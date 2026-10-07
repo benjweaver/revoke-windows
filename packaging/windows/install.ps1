@@ -124,6 +124,8 @@ param([switch]$Uninstall, [switch]$Update)
         # /MIR makes the folder match the release exactly, so files a newer one dropped go too.
         robocopy $new $dir /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "Copying Revoke into $dir failed (robocopy exit code $LASTEXITCODE)" }
+        # Below 8, robocopy is saying what it copied, not failing; don't pass that on as an exit code.
+        $global:LASTEXITCODE = 0
         Write-Host "Installed Revoke in $dir"
     }
     finally {

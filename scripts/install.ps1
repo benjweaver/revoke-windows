@@ -40,6 +40,8 @@ New-Item -ItemType Directory -Force -Path $dir | Out-Null
 # /MIR makes the folder match the build exactly, so files a newer build dropped go too.
 robocopy $publish $dir /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "Copying the build failed (robocopy exit code $LASTEXITCODE)." }
+# Below 8, robocopy is saying what it copied, not failing; don't pass that on as an exit code.
+$global:LASTEXITCODE = 0
 Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
 
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Revoke.lnk'
