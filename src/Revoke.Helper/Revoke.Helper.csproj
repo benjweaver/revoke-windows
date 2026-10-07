@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>RevokeHelper</AssemblyName>
+    <RootNamespace>RevokeHelper</RootNamespace>
+    <Description>Revoke Helper: makes Revoke's firewall and service changes without a UAC prompt each time</Description>
+    <!-- One file, with .NET inside, so it runs from Program Files on its own. -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Revoke.Core\Revoke.Core.csproj" />
+  </ItemGroup>
+</Project>

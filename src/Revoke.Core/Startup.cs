@@ -84,6 +84,6 @@ public static class Startup
         return bytes;
     }
 
-    /// <summary>The registry path PowerShell needs to switch a machine-wide Run value.</summary>
-    public static string MachineApprovalPath(bool wow64) => $@"HKLM:\{Approved}\{(wow64 ? "Run32" : "Run")}";
+    /// <summary>Where Windows keeps whether each machine-wide Run value is switched on.</summary>
+    public static string ApprovedKey(bool wow64) => $@"{Approved}\{(wow64 ? "Run32" : "Run")}";
 }

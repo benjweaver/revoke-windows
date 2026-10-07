@@ -14,9 +14,11 @@ sealed record View(
     int LimitMinutes,
     bool RevokeOnLock,
     bool LaunchAtLogin,
+    bool HelperInstalled,
+    bool HelperCurrent,
     IReadOnlyList<KnownApp> Known)
 {
-    public static readonly View Empty = new(Snapshot.Empty, null, false, false, false, 30, false, false, []);
+    public static readonly View Empty = new(Snapshot.Empty, null, false, false, false, 30, false, false, false, true, []);
 }
 
 /// <summary>
@@ -154,6 +156,15 @@ sealed class Controller
         return null;
     }, wait: true);
 
+    /// <summary>Installs, updates or removes the helper, behind one UAC prompt.</summary>
+    public Task<Activity?> SetHelperAsync(bool install) => ActAsync(_ =>
+    {
+        var error = install ? Helper.Install() : Helper.Uninstall();
+        return error is not null
+            ? Activity.Now($"Couldn't {(install ? "install" : "remove")} the helper: {error}", true)
+            : Activity.Now(install ? "Installed the helper: no more admin prompts for watched apps" : "Removed the helper");
+    });
+
     public void SetLaunchAtLogin(bool on)
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKey);
@@ -173,6 +184,8 @@ sealed class Controller
         m.Settings.LimitMinutes,
         m.Settings.RevokeOnLock,
         LaunchAtLogin(),
+        Helper.IsInstalled,
+        Helper.IsCurrent,
         m.KnownApps());
 
     void Publish(View view)

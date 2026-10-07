@@ -143,6 +143,8 @@ public sealed partial class PanelWindow : Window
         Activity.Foreground = (Brush)Application.Current.Resources[view.Activity?.IsError == true
             ? "SystemFillColorCriticalBrush" : "TextFillColorSecondaryBrush"];
         ToolTipService.SetToolTip(Activity, string.IsNullOrEmpty(Activity.Text) ? null : Activity.Text);
+        Footnote.Text = "Switching camera, microphone, location or screen capture on opens Settings, because only you can grant access there."
+            + (view.HelperInstalled ? "" : " Services and firewall rules ask for admin, unless you install the helper in Settings.");
 
         // Sections and rows, rebuilt only when the set or order changes, so a switch with
         // keyboard focus keeps it across the updates every couple of seconds.
@@ -157,7 +159,7 @@ public sealed partial class PanelWindow : Window
         foreach (var row in snapshot.AllRows)
         {
             if (!rows.TryGetValue(row.Client, out var rowView)) rows[row.Client] = rowView = new RowView(this, row.Client);
-            rowView.Update(row, view.Busy);
+            rowView.Update(row, view.Busy, !view.HelperInstalled);
         }
         foreach (var gone in rows.Keys.Where(c => !snapshot.AllRows.Any(r => r.Client == c)).ToList()) rows.Remove(gone);
         if (!newOrder.SequenceEqual(order))
@@ -291,7 +293,7 @@ public sealed partial class PanelWindow : Window
             }
         }
 
-        public void Update(Row row, bool busy)
+        public void Update(Row row, bool busy, bool askForAdmin)
         {
             name.Text = row.Name;
             letter.Text = row.Name[..1].ToUpperInvariant();
@@ -299,7 +301,7 @@ public sealed partial class PanelWindow : Window
             glyph.Visibility = row.Icon is null ? Visibility.Visible : Visibility.Collapsed;
             detail.Text = Detail(row);
             ToolTipService.SetToolTip(detail, row.Helpers.Count > 0 ? "Helpers: " + Model.List(row.Helpers) : null);
-            foreach (var (pane, cell) in cells) cell.Update(row.Cells[pane], row.Name, busy);
+            foreach (var (pane, cell) in cells) cell.Update(row.Cells[pane], row.Name, busy, askForAdmin);
         }
 
         static string Detail(Row row)
@@ -360,7 +362,7 @@ public sealed partial class PanelWindow : Window
             Root.Children.Add(stale);
         }
 
-        public void Update(Cell cell, string appName, bool busy)
+        public void Update(Cell cell, string appName, bool busy, bool askForAdmin)
         {
             Switch.Visibility = cell.Enabled ? Visibility.Visible : Visibility.Collapsed;
             dash.Visibility = cell.Enabled ? Visibility.Collapsed : Visibility.Visible;
@@ -368,7 +370,7 @@ public sealed partial class PanelWindow : Window
             stale.Visibility = cell.Stale ? Visibility.Visible : Visibility.Collapsed;
             if (Switch.IsOn != cell.On) Switch.IsOn = cell.On;
             Switch.IsEnabled = !busy;
-            var help = cell.NeedsAdmin && cell.Enabled ? cell.Help + " (asks for admin)" : cell.Help;
+            var help = cell.NeedsAdmin && cell.Enabled && askForAdmin ? cell.Help + " (asks for admin)" : cell.Help;
             ToolTipService.SetToolTip(Root, help);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(Switch, $"{column} for {appName}");
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(Switch, help);

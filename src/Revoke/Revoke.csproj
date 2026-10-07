@@ -21,4 +21,15 @@
   <ItemGroup>
     <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- The helper ships beside Revoke.exe as one self-contained file, which installing
+       it from Settings copies into Program Files. -->
+  <Target Name="PublishHelperToOutput" AfterTargets="Build">
+    <MSBuild Projects="..\Revoke.Helper\Revoke.Helper.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);PublishDir=$(TargetDir)Helper\" />
+  </Target>
+  <Target Name="PublishHelperToPublishDir" AfterTargets="Publish">
+    <MSBuild Projects="..\Revoke.Helper\Revoke.Helper.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);PublishDir=$([System.IO.Path]::GetFullPath('$(PublishDir)'))Helper\" />
+  </Target>
 </Project>

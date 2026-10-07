@@ -442,7 +442,7 @@ public sealed class Model
                 foreach (var entry in f.Startup)
                 {
                     if (entry.Item is StartupItem.Run { Machine: true } run)
-                        ops.Add(new ElevatedOp.SetMachineStartup(Startup.MachineApprovalPath(run.Wow64), run.Name, true));
+                        ops.Add(new ElevatedOp.SetMachineStartup(run.Wow64, run.Name, true));
                     else
                         Startup.Set(entry.Item, true);
                 }
@@ -506,7 +506,7 @@ public sealed class Model
                         {
                             if (entry.Item is StartupItem.Run { Machine: true } run)
                             {
-                                ops.Add(new ElevatedOp.SetMachineStartup(Startup.MachineApprovalPath(run.Wow64), run.Name, false));
+                                ops.Add(new ElevatedOp.SetMachineStartup(run.Wow64, run.Name, false));
                                 continue;
                             }
                             try { Startup.Set(entry.Item, false); }

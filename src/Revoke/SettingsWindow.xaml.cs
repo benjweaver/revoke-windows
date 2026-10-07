@@ -43,6 +43,19 @@ public sealed partial class SettingsWindow : Window
         LaunchAtLogin.IsOn = view.LaunchAtLogin;
         Limit.SelectedIndex = Array.IndexOf(Settings.TimeLimits, view.LimitMinutes);
         Limit.IsEnabled = view.RevokeAfterLimit;
+        HelperStatus.Text = (view.HelperInstalled, view.HelperCurrent) switch
+        {
+            (true, true) => "Installed. Firewall and service changes for Anthropic and OpenAI apps happen without a UAC prompt. Other apps still ask.",
+            (true, false) => "A newer helper came with this version of Revoke. Updating it asks for admin once.",
+            _ => "Makes firewall and service changes without a UAC prompt each time. It's a small Windows service only your account can use, and installing it asks for admin once.",
+        };
+        HelperButton.Content = (view.HelperInstalled, view.HelperCurrent) switch
+        {
+            (true, true) => "Remove",
+            (true, false) => "Update",
+            _ => "Install",
+        };
+        HelperButton.IsEnabled = !view.Busy;
 
         foreach (var app in view.Known)
         {
@@ -132,6 +145,9 @@ public sealed partial class SettingsWindow : Window
         if (updating || Limit.SelectedItem is not ComboBoxItem { Tag: int minutes }) return;
         await controller.ChangeSettingsAsync(settings => settings.LimitMinutes = minutes);
     }
+
+    async void Helper_Click(object sender, RoutedEventArgs e) =>
+        await controller.SetHelperAsync(install: !controller.View.HelperInstalled || !controller.View.HelperCurrent);
 
     void Quit_Click(object sender, RoutedEventArgs e) => App.Current.Quit();
 

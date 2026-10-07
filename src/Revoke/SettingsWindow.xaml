@@ -67,6 +67,14 @@
         <TextBlock Text="General" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
         <Grid Style="{StaticResource Card}">
           <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Admin helper" />
+            <TextBlock x:Name="HelperStatus" Style="{StaticResource Hint}" />
+          </StackPanel>
+          <Button x:Name="HelperButton" Grid.Column="1" Click="Helper_Click" />
+        </Grid>
+        <Grid Style="{StaticResource Card}">
+          <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <TextBlock Text="Open at sign-in" VerticalAlignment="Center" />
           <ToggleSwitch x:Name="LaunchAtLogin" Grid.Column="1" Toggled="Option_Toggled" AutomationProperties.Name="Open at sign-in" />
         </Grid>

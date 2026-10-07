@@ -18,3 +18,5 @@ All notable changes are listed here. The format follows
   time limit, or when the PC locks or sleeps.
 - Helpers an app starts show in its row and stop with it.
 - Apps signed by Anthropic and OpenAI are watched by default.
+- An admin helper, installed once from Settings, that makes firewall and service
+  changes for watched developers' apps without a UAC prompt each time.

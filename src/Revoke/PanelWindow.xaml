@@ -67,6 +67,6 @@
 
     <TextBlock Grid.Row="5" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-               Text="Switching camera, microphone, location or screen capture on opens Settings, because only you can grant access there. Services and firewall rules ask for admin." />
+               x:Name="Footnote" />
   </Grid>
 </Window>

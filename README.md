@@ -77,10 +77,38 @@ appears out of nowhere.
 
 Everything Revoke reads needs no admin rights. Most changes don't either: privacy and
 startup switches live in your part of the registry, and stopping your own processes is
-yours to do. Services, firewall rules and machine-wide startup entries need admin, so
-Revoke gathers them into one PowerShell script and runs it behind a single UAC prompt.
-The script goes on the command line, encoded, rather than into a file another program
-could swap out before it runs as admin. Rules Revoke adds are in the firewall group
+yours to do. Services, firewall rules and machine-wide startup entries need admin.
+
+Revoke makes those changes through Windows' own interfaces, with no scripts: the
+Service Control Manager for services, the firewall's management provider to switch
+rules on and off and delete them by their exact ID, the Windows Firewall API to create
+rules, and the registry for startup entries.
+
+### The admin helper
+
+So those don't ask every time, Revoke can install a helper from Settings, behind one
+UAC prompt: a small Windows service, `RevokeHelper`, in
+`C:\Program Files\Revoke\Helper`, where only admins can replace it. It listens on a
+named pipe that only your Windows account can open, and Revoke only talks to it after
+checking with the service manager that the pipe belongs to that service.
+
+Any program running as you could talk to the helper too, so it checks every change
+itself and only makes ones that tighten things or undo its own:
+
+- switch off inbound allow rules, and back on only the ones it switched off;
+- add and remove rules in Revoke's own firewall group;
+- stop, or set to Manual, services from watched developers (Anthropic and OpenAI), and
+  put back only start types it changed;
+- switch those developers' machine-wide startup entries off and on.
+
+Anything else, like the service of an app you added to the watch list yourself, still
+gets a UAC prompt. The helper logs every request to the Application event log under
+`RevokeHelper`. Remove it from Settings, also behind one UAC prompt.
+
+Without the helper, Revoke runs the helper program once as admin for each set of
+changes, behind one UAC prompt. The changes go on its command line rather than into a
+file another program could swap out before it runs. Until Revoke is code-signed, that
+prompt names an unknown publisher. Rules Revoke adds are in the firewall group
 `Revoke`.
 
 Settings live in `%APPDATA%\Revoke\settings.json`. Nothing leaves the PC.
@@ -97,7 +125,9 @@ dotnet publish src/Revoke -c Release -o publish
 ```
 
 The app is self-contained (.NET and the Windows App SDK included), so `publish` runs
-on a PC without either installed. `scripts/make-icons.py` redraws the tray icons.
+on a PC without either installed. Building the app also publishes the helper
+(`src/Revoke.Helper`) beside it as one file, `Helper\RevokeHelper.exe`.
+`scripts/make-icons.py` redraws the tray icons.
 
 The tests only read your PC, except for stopping processes they start themselves.
 

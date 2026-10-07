@@ -66,14 +66,16 @@ public class LiveTests(ITestOutputHelper output)
                     foreach (var row in model.Snapshot.Watched.Where(r => r.Client != client)) settings.Removed.Add(row.Client.Key);
                     model.Refresh();
                 }
-                Assert.Equal([client], model.Snapshot.Watched.Select(r => r.Client));
-                Assert.True(model.Snapshot.Watched[0].IsOn(Pane.Running));
+                string Rows() => string.Join("; ", model.Snapshot.Watched.Select(r => $"{r.Name} running={r.IsOn(Pane.Running)} procs={r.Processes}"));
+                output.WriteLine($"watched: {Rows()}");
+                Assert.True(model.Snapshot.Watched.Select(r => r.Client).SequenceEqual([client]), $"watched: {Rows()}");
+                Assert.True(model.Snapshot.Watched[0].IsOn(Pane.Running), $"watched: {Rows()}");
 
                 var activity = model.Revoke([client], [Pane.Running], null, allowAdmin: false);
-                output.WriteLine(activity.Text);
+                output.WriteLine($"{activity.Text}; after: {Rows()}");
                 Assert.False(activity.IsError, activity.Text);
-                Assert.True(standIn.WaitForExit(2000));
-                Assert.False(model.RowFor(client)?.IsOn(Pane.Running) ?? false);
+                Assert.True(standIn.WaitForExit(2000), "the stand-in is still running");
+                Assert.False(model.RowFor(client)?.IsOn(Pane.Running) ?? false, $"after: {Rows()}");
             }
             finally
             {
@@ -90,6 +92,50 @@ public class LiveTests(ITestOutputHelper output)
                 catch (IOException) { Thread.Sleep(100); }
             }
         }
+    }
+
+    /// <summary>
+    /// The installed helper, end to end: the pipe, the check that it's the real service,
+    /// the policy, and running the script as SYSTEM. Every request is harmless: removing
+    /// blocks for an app that doesn't exist, and two the helper has to decline.
+    /// </summary>
+    [Fact]
+    public void TheInstalledHelperMakesAllowedChangesAndDeclinesTheRest()
+    {
+        Assert.SkipUnless(Helper.IsInstalled, "The helper isn't installed.");
+        List<ElevatedOp> ops =
+        [
+            new ElevatedOp.RemoveBlocks("exe:c:\\revoke-probe\\does-not-exist.exe"),
+            new ElevatedOp.StopService("EventLog"),
+            new ElevatedOp.SetRuleEnabled("{00000000-0000-0000-0000-000000000000}", true),
+        ];
+        var watch = Stopwatch.StartNew();
+        var reply = Helper.Send(ops);
+        output.WriteLine($"reply in {watch.ElapsedMilliseconds} ms: error={reply?.Error ?? "none"}, declined=[{string.Join(", ", reply?.Rejected ?? [])}]");
+        Assert.NotNull(reply);
+        Assert.Null(reply.Error);
+        Assert.Equal([1, 2], reply.Rejected);
+        Assert.Equal(System.ServiceProcess.ServiceControllerStatus.Running,
+            new System.ServiceProcess.ServiceController("EventLog").Status);
+    }
+
+    /// <summary>
+    /// The native admin changes, run as this user. Removing Revoke's blocks for an app
+    /// that doesn't exist reads the firewall and deletes nothing, so it succeeds; stopping
+    /// a service that doesn't exist fails, and says so. Nothing here changes the PC.
+    /// </summary>
+    [Fact]
+    public void AdminChangesReportWhatFailed()
+    {
+        var watch = Stopwatch.StartNew();
+        var failures = AdminChanges.Apply(
+        [
+            new ElevatedOp.RemoveBlocks(@"exe:c:\revoke-probe\does-not-exist.exe"),
+            new ElevatedOp.StopService("RevokeNoSuchService"),
+        ]);
+        output.WriteLine($"{watch.ElapsedMilliseconds} ms: {string.Join(" | ", failures)}");
+        Assert.Single(failures);
+        Assert.StartsWith("Stop RevokeNoSuchService:", failures[0]);
     }
 
     /// <summary>Reads everything and prints what the panel would show.</summary>

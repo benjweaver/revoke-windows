@@ -4,9 +4,11 @@
     <RootNamespace>Revoke.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.12" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.12" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Revoke.Core.Tests" />
+    <InternalsVisibleTo Include="RevokeHelper" />
   </ItemGroup>
 </Project>
