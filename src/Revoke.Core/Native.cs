@@ -61,6 +61,12 @@ internal static unsafe partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool TerminateProcess(nint process, uint exitCode);
 
+    public const uint STILL_ACTIVE = 259;
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetExitCodeProcess(nint process, out uint exitCode);
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool EnumWindows(delegate* unmanaged<nint, nint, int> callback, nint lParam);

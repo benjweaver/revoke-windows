@@ -96,12 +96,38 @@ public static unsafe class Processes
     public static string? Kill(Proc proc)
     {
         var handle = Native.OpenProcess(Native.PROCESS_TERMINATE | Native.PROCESS_QUERY_LIMITED_INFORMATION, false, proc.Pid);
-        if (handle == 0) return Marshal.GetPInvokeErrorMessage(Marshal.GetLastPInvokeError());
+        if (handle == 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            return Gone(proc) ? null : Marshal.GetPInvokeErrorMessage(error);
+        }
         try
         {
             // It already ended, and the ID belongs to something else now.
             if (proc.Started != 0 && CreationTime(handle) != proc.Started) return null;
-            return Native.TerminateProcess(handle, 1) ? null : Marshal.GetPInvokeErrorMessage(Marshal.GetLastPInvokeError());
+            if (Native.TerminateProcess(handle, 1)) return null;
+            var error = Marshal.GetLastPInvokeError();
+            // A process already on its way out (a console host whose program just ended,
+            // say) refuses to be ended again. That's not a failure.
+            return Native.GetExitCodeProcess(handle, out var code) && code != Native.STILL_ACTIVE
+                ? null : Marshal.GetPInvokeErrorMessage(error);
+        }
+        finally
+        {
+            Native.CloseHandle(handle);
+        }
+    }
+
+    /// <summary>Whether a process has ended since it was listed: its ID is free, or belongs
+    /// to a later process, or it's exiting.</summary>
+    static bool Gone(Proc proc)
+    {
+        var handle = Native.OpenProcess(Native.PROCESS_QUERY_LIMITED_INFORMATION, false, proc.Pid);
+        if (handle == 0) return Marshal.GetLastPInvokeError() == 87; // ERROR_INVALID_PARAMETER: no such process
+        try
+        {
+            return (proc.Started != 0 && CreationTime(handle) != proc.Started)
+                || (Native.GetExitCodeProcess(handle, out var code) && code != Native.STILL_ACTIVE);
         }
         finally
         {
