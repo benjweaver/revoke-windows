@@ -5,6 +5,9 @@
     <AssemblyName>Revoke</AssemblyName>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- Without it, publishing leaves out Revoke.pri and the compiled XAML, and the app
+         crashes on start. It adds no MSIX packaging to an app that isn't packaged. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
