@@ -10,29 +10,50 @@ built natively with WinUI 3.
 
 ## Install
 
-In PowerShell, for your user, with no admin rights:
+On Windows 10 2004 or later (x64, or ARM64 through its x64 emulation), in PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/benjweaver/revoke-windows/main/packaging/windows/install.ps1 | iex
 ```
 
-Revoke goes in `%LOCALAPPDATA%\Programs\Revoke`, with a Start menu shortcut, and
-starts in the notification area. The script checks the download against its
-checksum before installing. Windows 10 2004 or later, x64 (ARM64 runs the x64 build).
+That downloads the latest release, checks it against `SHA256SUMS`, puts it in
+`%LOCALAPPDATA%\Programs\Revoke` with a Start menu shortcut, and starts it in the
+notification area, where its settings open the first time. It needs no admin rights,
+so it works on a managed work machine too, unless your organisation blocks unsigned
+programs. Only the optional admin helper, installed from Revoke's settings, asks for
+admin.
 
-To update to the latest release:
+On macOS, [Revoke for macOS](https://github.com/benjweaver/revoke):
+
+```sh
+brew install --cask benjweaver/revoke/revoke
+```
+
+### Updating and removing
+
+Revoke doesn't go online by itself, so it doesn't update itself either. To update a
+copy installed by the command above to the latest release:
 
 ```powershell
 irm https://raw.githubusercontent.com/benjweaver/revoke-windows/main/packaging/windows/update.ps1 | iex
 ```
 
-To uninstall, which also removes the admin helper if it's installed (asking for admin
-once), puts back the firewall rules Revoke switched off and deletes its own, and keeps
-your settings in `%APPDATA%\Revoke`:
+If you already have the latest release, that only makes sure Revoke is running. To
+remove Revoke, keeping your settings in `%APPDATA%\Revoke`:
 
 ```powershell
 irm https://raw.githubusercontent.com/benjweaver/revoke-windows/main/packaging/windows/uninstall.ps1 | iex
 ```
+
+That also removes the admin helper if it's installed, which asks for admin once, and
+leaves the firewall as it was: rules Revoke switched off go back on, and its own go.
+
+### Other ways to install
+
+Otherwise, download `Revoke-<version>-windows-x64.zip` from the
+[Releases page](https://github.com/benjweaver/revoke-windows/releases), check it
+against `SHA256SUMS`, unzip it anywhere and run `Revoke.exe`. Or build it yourself,
+as described under [Build](#build).
 
 ## Why it stops apps
 
