@@ -5,8 +5,9 @@
 The app icon is the one Revoke for macOS uses: its PNGs, copied into
 src/Revoke/Assets, go into icon.ico unchanged. The tray icons are drawn here, at
 each size the notification area uses (16 to 48 pixels, for 100% to 300%
-scaling): a lock, closed in the taskbar's text color while watched apps are
-stopped, and open in orange while any of them is running. Standard library only.
+scaling): a lock in the taskbar's text color, as Windows' own icons are, closed
+while watched apps are stopped and open while any of them is running. Standard
+library only.
 """
 
 import os
@@ -85,10 +86,14 @@ def ico(images):
 
 
 def main():
+    # Monochrome, like Windows' own notification-area icons: white on a dark taskbar,
+    # near-black on a light one. Open or closed, the shackle alone tells them apart.
+    white, black = (255, 255, 255), (26, 26, 26)
     tray = {
-        "tray-closed-dark.ico": ((255, 255, 255), False),  # on a dark taskbar
-        "tray-closed-light.ico": ((26, 26, 26), False),  # on a light taskbar
-        "tray-open.ico": ((247, 99, 12), True),  # Windows' orange, on either
+        "tray-closed-dark.ico": (white, False),
+        "tray-closed-light.ico": (black, False),
+        "tray-open-dark.ico": (white, True),
+        "tray-open-light.ico": (black, True),
     }
     for name, (color, open_) in tray.items():
         # Bitmap images rather than PNG: LoadImage reads those at every size.

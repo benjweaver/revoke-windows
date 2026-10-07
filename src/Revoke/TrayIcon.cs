@@ -50,8 +50,8 @@ sealed unsafe partial class TrayIcon : IDisposable
         Add();
     }
 
-    /// <summary>An open orange lock while a watched app is running; otherwise a closed one
-    /// in the taskbar's text color.</summary>
+    /// <summary>A lock in the taskbar's text color, like Windows' own icons: open while a
+    /// watched app is running, closed otherwise.</summary>
     public void Update(bool exposed, string status)
     {
         this.exposed = exposed;
@@ -77,7 +77,7 @@ sealed unsafe partial class TrayIcon : IDisposable
 
     NOTIFYICONDATAW Data()
     {
-        var name = exposed ? "tray-open.ico" : LightTaskbar() ? "tray-closed-light.ico" : "tray-closed-dark.ico";
+        var name = $"tray-{(exposed ? "open" : "closed")}-{(LightTaskbar() ? "light" : "dark")}.ico";
         if (name != iconName || icon == 0)
         {
             if (icon != 0) DestroyIcon(icon);
