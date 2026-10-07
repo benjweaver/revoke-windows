@@ -4,9 +4,16 @@ using Microsoft.Win32;
 namespace Revoke.Core;
 
 /// <param name="Start">2 automatic, 3 manual, 4 disabled.</param>
-public sealed record Service(string Name, string DisplayName, Client Client, string Program, int Start, bool Running)
+/// <param name="Account">The account it runs as: "LocalSystem" for most app services.</param>
+/// <param name="Packaged">Installed by an MSIX package. Only Windows' package installer
+/// (AppXSvc) can change how these start, not even admins or SYSTEM, though any user may
+/// stop or start them.</param>
+public sealed record Service(string Name, string DisplayName, Client Client, string Program, int Start, bool Running,
+    string Account = "", bool Packaged = false)
 {
     public bool StartsWithWindows => Start == 2;
+
+    public bool RunsAsSystem => Account.Equals("LocalSystem", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Set-Service's name for a start value.</summary>
     public static string StartName(int start) => start switch
@@ -50,9 +57,36 @@ public static class Services
                 Client.FromPath(program),
                 program,
                 key.GetValue("Start") is int start ? start : 3,
-                false));
+                false,
+                key.GetValue("ObjectName") as string ?? "LocalSystem",
+                (type & 0x200) != 0)); // SERVICE_PKG_SERVICE
         }
         return services;
+    }
+
+    /// <summary>Stops or starts a service as the current user, which many services allow
+    /// (packaged ones always). Returns false if Windows wants admin rights for it.</summary>
+    public static bool TrySet(string name, bool running)
+    {
+        try
+        {
+            using var service = new ServiceController(name);
+            if (running)
+            {
+                if (service.Status is ServiceControllerStatus.Running or ServiceControllerStatus.StartPending) return true;
+                service.Start();
+            }
+            else
+            {
+                if (service.Status is ServiceControllerStatus.Stopped or ServiceControllerStatus.StopPending) return true;
+                service.Stop(stopDependentServices: true);
+            }
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Whether each service is running. Asking the service manager needs no admin rights.</summary>

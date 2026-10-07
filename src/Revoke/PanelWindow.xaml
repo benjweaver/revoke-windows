@@ -7,7 +7,7 @@
     <DesktopAcrylicBackdrop />
   </Window.SystemBackdrop>
 
-  <Grid x:Name="Root" Width="660" Padding="16" RowSpacing="12" KeyDown="Root_KeyDown">
+  <Grid x:Name="Root" Width="720" Padding="16" RowSpacing="12" KeyDown="Root_KeyDown">
     <Grid.Resources>
       <!-- Switches are orange while access is on, as in Revoke for macOS: on means exposed. -->
       <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#F7630C" />

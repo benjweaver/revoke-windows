@@ -23,13 +23,21 @@ One row per watched app, one switch per column. A switch is orange while access 
 
 | Column | On means | Switching off |
 |---|---|---|
-| Running | The app, its helpers or its service are running | Stops the app and its whole process tree, and its service (asks for admin) |
-| Startup | It opens at sign-in, or its service starts with Windows | Turns off its startup task or Run entry, and sets its service to Manual |
+| Running | The app or its helpers are running | Stops the app and its whole process tree |
+| Startup | It opens when you sign in, as Task Manager's Startup apps list shows | Turns off its startup task or Run entry |
+| Service | A Windows service it installed is running, or starts with Windows. Task Manager's Startup apps list leaves these out | Stops the service and keeps it stopped until you switch it back on. **This can break the app**: features that need the service stop working. Revoke asks first |
 | Screen | It may capture the screen through Windows' screenshot API | Denies it in Settings › Privacy & security |
 | Camera, Mic, Location | It's allowed to use them | Denies it. A red dot means it's using one right now |
 | Network | Devices on your network can connect to it, or it can reach them | Switches off its inbound firewall rules and blocks it from your local network (asks for admin) |
 
 Switching a privacy column back on opens Settings, where only you can grant access.
+
+Apps install services because they need them: Claude's Cowork features run in
+CoworkVMService, for one. Packaged apps' services (Claude's and ChatGPT's are) can't be
+set to start only when asked, not even by an admin; only Windows' package installer can
+change that. So switching one off means Revoke stops it whenever it starts, at boot or
+when the app starts it, until you switch it back on. Revoke confirms before stopping a
+service, and marks one it keeps stopped.
 
 **Revoke All Watched** does every column for every watched app, behind one admin
 prompt. Apps signed by Anthropic and OpenAI are watched by default; any other app with
@@ -122,6 +130,13 @@ later; built and tested on Windows 11.
 dotnet build src/Revoke
 dotnet test --project tests/Revoke.Core.Tests
 dotnet publish src/Revoke -c Release -o publish
+```
+
+To build a release and install it for your user, in `%LOCALAPPDATA%\Programs\Revoke` with a
+Start menu shortcut and no admin rights:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
 The app is self-contained (.NET and the Windows App SDK included), so `publish` runs

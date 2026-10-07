@@ -16,18 +16,19 @@ namespace Revoke;
 /// <summary>The panel above the tray icon: one switch per app and column.</summary>
 public sealed partial class PanelWindow : Window
 {
-    const double PanelWidth = 660;
+    const double PanelWidth = 720;
     const double ColumnWidth = 52;
 
     static readonly (Pane Pane, string Glyph, string Short, string Tip)[] Panes =
     [
-        (Pane.Running, "", "Running", "Running: the app, its helpers and services"),
-        (Pane.Startup, "", "Startup", "Starts by itself: at sign-in, or as a service with Windows"),
-        (Pane.Screen, "", "Screen", "Screen capture (Settings › Privacy & security › Screenshots and apps)"),
-        (Pane.Camera, "", "Camera", "Camera"),
-        (Pane.Microphone, "", "Mic", "Microphone"),
-        (Pane.Location, "", "Location", "Location"),
-        (Pane.Network, "", "Network", "Local network: devices on your network connecting to it, and it connecting to them"),
+        (Pane.Running, "\uE768", "Running", "Running: the app and its helpers"),
+        (Pane.Startup, "\uE7E8", "Startup", "Opens when you sign in, as in Task Manager's Startup apps"),
+        (Pane.Service, "\uE90F", "Service", "A Windows service the app installed, running or starting with Windows"),
+        (Pane.Screen, "\uE7F4", "Screen", "Screen capture (Settings › Privacy & security › Screenshots and apps)"),
+        (Pane.Camera, "\uE714", "Camera", "Camera"),
+        (Pane.Microphone, "\uE720", "Mic", "Microphone"),
+        (Pane.Location, "\uE707", "Location", "Location"),
+        (Pane.Network, "\uE968", "Network", "Local network: devices on your network connecting to it, and it connecting to them"),
     ];
 
     readonly Controller controller;
@@ -231,10 +232,70 @@ public sealed partial class PanelWindow : Window
     {
         if (updating) return;
         var on = toggle.IsOn;
+        if (pane == Pane.Service && !on
+            && !await ConfirmStoppingServices(controller.View.Snapshot.AllRows.Where(r => r.Client == client)))
+        {
+            updating = true;
+            toggle.IsOn = true;
+            updating = false;
+            return;
+        }
         await controller.ActAsync(m => m.Set(client, pane, on));
     }
 
-    async void RevokeAll_Click(object sender, RoutedEventArgs e) => await controller.ActAsync(m => m.RevokeAll());
+    async void RevokeAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (!await ConfirmStoppingServices(controller.View.Snapshot.Watched)) return;
+        await controller.ActAsync(m => m.RevokeAll());
+    }
+
+    /// <summary>
+    /// Stopping a service an app installed can break the app: Claude's Cowork features need
+    /// CoworkVMService, for one. So the first time, and until "Don't ask again", this says
+    /// which services and apps, and asks.
+    /// </summary>
+    async Task<bool> ConfirmStoppingServices(IEnumerable<Row> rows)
+    {
+        if (!controller.View.AskBeforeStoppingServices) return true;
+        var affected = rows.Where(r => r.IsOn(Pane.Service) && r.Services.Count > 0).ToList();
+        if (affected.Count == 0) return true;
+
+        var services = affected.SelectMany(r => r.Services.Select(s => (Service: s, App: r.Name))).ToList();
+        var content = new StackPanel { Spacing = 12, MaxWidth = 440 };
+        content.Children.Add(new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Text = services.Count == 1
+                ? $"{services[0].App} installed {services[0].Service} to run in the background. While it's off, Revoke keeps it stopped, so features of {services[0].App} that need it won't work, and {services[0].App} may show errors, until you switch it back on in Revoke."
+                : "These apps installed services that run in the background. While they're off, Revoke keeps them stopped, so features that need them won't work, and the apps may show errors, until you switch them back on in Revoke.",
+        });
+        if (services.Count > 1)
+        {
+            content.Children.Add(new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                Text = string.Join("\n", services.Select(s => $"• {s.Service} ({s.App})")),
+            });
+        }
+        var dontAsk = new CheckBox { Content = "Don't ask again" };
+        content.Children.Add(dontAsk);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Root.XamlRoot,
+            Title = services.Count == 1 ? $"Stop {services[0].Service}?" : "Stop these services?",
+            Content = content,
+            PrimaryButtonText = services.Count == 1 ? "Stop it" : "Stop them",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        var confirmed = await dialog.ShowAsync() == ContentDialogResult.Primary;
+        if (confirmed && dontAsk.IsChecked == true)
+        {
+            await controller.ChangeSettingsAsync(settings => settings.AskBeforeStoppingServices = false);
+        }
+        return confirmed;
+    }
 
     void Settings_Click(object sender, RoutedEventArgs e)
     {
@@ -315,7 +376,8 @@ public sealed partial class PanelWindow : Window
                 parts.Add(row.HasWindow ? "Open" : row.Client.Kind == ClientKind.Package ? "Running in the background" : "Running");
             }
             if (row.Helpers.Count > 0) parts.Add(row.Helpers.Count == 1 ? row.Helpers[0] : $"{row.Helpers.Count} helpers");
-            if (row.Services.Count > 0) parts.Add("service");
+            if (row.Cells[Pane.Service].Caution) parts.Add("service kept off");
+            else if (row.IsOn(Pane.Service)) parts.Add("service");
             return parts.Count > 0 ? string.Join(" + ", parts) : "Running";
         }
     }
@@ -345,7 +407,7 @@ public sealed partial class PanelWindow : Window
         // Blocked once, but the app has updated since.
         readonly FontIcon stale = new()
         {
-            Glyph = "", FontSize = 11,
+            Glyph = "\uE7BA", FontSize = 11,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, 0, 2, 0),
             Foreground = (Brush)Application.Current.Resources["SystemFillColorCautionBrush"],
@@ -367,7 +429,7 @@ public sealed partial class PanelWindow : Window
             Switch.Visibility = cell.Enabled ? Visibility.Visible : Visibility.Collapsed;
             dash.Visibility = cell.Enabled ? Visibility.Collapsed : Visibility.Visible;
             live.Visibility = cell.InUse ? Visibility.Visible : Visibility.Collapsed;
-            stale.Visibility = cell.Stale ? Visibility.Visible : Visibility.Collapsed;
+            stale.Visibility = cell.Stale || cell.Caution ? Visibility.Visible : Visibility.Collapsed;
             if (Switch.IsOn != cell.On) Switch.IsOn = cell.On;
             Switch.IsEnabled = !busy;
             var help = cell.NeedsAdmin && cell.Enabled && askForAdmin ? cell.Help + " (asks for admin)" : cell.Help;

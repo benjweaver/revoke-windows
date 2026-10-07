@@ -41,6 +41,7 @@ public sealed partial class SettingsWindow : Window
         RevokeAfterLimit.IsOn = view.RevokeAfterLimit;
         RevokeOnLock.IsOn = view.RevokeOnLock;
         LaunchAtLogin.IsOn = view.LaunchAtLogin;
+        AskBeforeStoppingServices.IsOn = view.AskBeforeStoppingServices;
         Limit.SelectedIndex = Array.IndexOf(Settings.TimeLimits, view.LimitMinutes);
         Limit.IsEnabled = view.RevokeAfterLimit;
         HelperStatus.Text = (view.HelperInstalled, view.HelperCurrent) switch
@@ -137,6 +138,7 @@ public sealed partial class SettingsWindow : Window
             if (toggle == RevokeOnClose) settings.RevokeOnClose = on;
             else if (toggle == RevokeOnLock) settings.RevokeOnLock = on;
             else if (toggle == RevokeAfterLimit) settings.SetRevokeAfterLimit(on);
+            else if (toggle == AskBeforeStoppingServices) settings.AskBeforeStoppingServices = on;
         });
     }
 

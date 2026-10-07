@@ -75,6 +75,14 @@
         </Grid>
         <Grid Style="{StaticResource Card}">
           <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Ask before stopping an app's service" />
+            <TextBlock Style="{StaticResource Hint}" Text="Apps like Claude install services they need. Stopping one can break features of the app until you switch it back on." />
+          </StackPanel>
+          <ToggleSwitch x:Name="AskBeforeStoppingServices" Grid.Column="1" Toggled="Option_Toggled" AutomationProperties.Name="Ask before stopping an app's service" />
+        </Grid>
+        <Grid Style="{StaticResource Card}">
+          <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <TextBlock Text="Open at sign-in" VerticalAlignment="Center" />
           <ToggleSwitch x:Name="LaunchAtLogin" Grid.Column="1" Toggled="Option_Toggled" AutomationProperties.Name="Open at sign-in" />
         </Grid>

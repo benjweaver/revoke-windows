@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Revoke.Core;
 
 /// <summary>A column in the panel.</summary>
-public enum Pane { Running, Startup, Screen, Camera, Microphone, Location, Network }
+public enum Pane { Running, Startup, Service, Screen, Camera, Microphone, Location, Network }
 
 /// <param name="On">Orange: the app can do this now.</param>
 /// <param name="InUse">Doing it this moment (camera, microphone, location, screen capture).</param>
@@ -12,7 +12,8 @@ public enum Pane { Running, Startup, Screen, Camera, Microphone, Location, Netwo
 /// <param name="NeedsAdmin">Switching it raises the admin prompt.</param>
 /// <param name="Stale">Revoke blocked it, but the app has updated since and the block no longer
 /// covers the new version.</param>
-public sealed record Cell(bool On, bool InUse, bool Enabled, bool NeedsAdmin, bool Stale, string Help);
+/// <param name="Caution">Off in a way that can break the app, like a service Revoke keeps stopped.</param>
+public sealed record Cell(bool On, bool InUse, bool Enabled, bool NeedsAdmin, bool Stale, string Help, bool Caution = false);
 
 /// <param name="Icon">The app's logo file, for packaged apps.</param>
 /// <param name="Deadline">When the time limit will stop it.</param>
@@ -270,41 +271,55 @@ public sealed class Model
         var packaged = f.Package is not null;
         var cells = new Dictionary<Pane, Cell>();
 
-        // Running
-        var runningServices = f.Services.Where(s => s.Running).ToList();
-        var running = f.Procs.Count > 0 || runningServices.Count > 0;
-        string help;
-        if (running)
-        {
-            var parts = new List<string> { $"{f.Procs.Count} process{(f.Procs.Count == 1 ? "" : "es")}" };
-            if (runningServices.Count > 0) parts.Add($"the {List(runningServices.Select(s => s.Name))} service");
-            help = $"{name} is running ({string.Join(" and ", parts)}). Switch off to stop it and everything it started.";
-            if (runningServices.Count > 0) help += " Stopping its service needs admin.";
-        }
-        else
-        {
-            help = packaged ? $"{name} isn't running. Switch on to open it." : $"{name} isn't running.";
-        }
-        cells[Pane.Running] = new Cell(running, false, running || packaged, runningServices.Count > 0, false, help);
+        // Running: the app's own processes, and what they started.
+        var running = f.Procs.Count > 0;
+        string help = running
+            ? $"{name} is running ({f.Procs.Count} process{(f.Procs.Count == 1 ? "" : "es")}). Switch off to stop it and everything it started."
+            : packaged ? $"{name} isn't running. Switch on to open it." : $"{name} isn't running.";
+        cells[Pane.Running] = new Cell(running, false, running || packaged, false, false, help);
 
-        // Startup
+        // Startup: opening at sign-in, as Task Manager's Startup apps list shows it.
         var enabledItems = f.Startup.Where(e => e.Enabled).ToList();
-        var autoServices = f.Services.Where(s => s.StartsWithWindows).ToList();
-        var starts = enabledItems.Count > 0 || autoServices.Count > 0;
-        var changeable = f.Startup.Count > 0 || f.Services.Count > 0;
-        var startupAdmin = autoServices.Count > 0 || enabledItems.Any(e => e.Item is StartupItem.Run { Machine: true });
-        if (starts)
+        var opensAtSignIn = enabledItems.Count > 0;
+        help = opensAtSignIn ? $"{name} opens when you sign in. Switch off to stop that."
+            : f.Startup.Count > 0 ? $"{name} doesn't open when you sign in. Switch on to let it again."
+            : $"{name} has no startup entry.";
+        cells[Pane.Startup] = new Cell(opensAtSignIn, false, f.Startup.Count > 0,
+            enabledItems.Any(e => e.Item is StartupItem.Run { Machine: true }), false, help);
+
+        // Service: a Windows service the app installed, which Task Manager's Startup apps
+        // list leaves out. On while it runs, or will start with Windows and run. Off once
+        // switched off: Revoke stops it, and keeps it stopped.
+        var runningServices = f.Services.Where(s => s.Running).ToList();
+        var kept = f.Services.Where(s => Settings.KeepStopped.Contains(s.Name)).ToList();
+        var autoServices = f.Services.Where(s => s.StartsWithWindows && !kept.Contains(s)).ToList();
+        var serviceOn = runningServices.Count > 0 || autoServices.Count > 0;
+        var serviceNames = List(f.Services.Select(s => s.Name));
+        if (f.Services.Count == 0)
+        {
+            help = $"{name} has no Windows service.";
+        }
+        else if (serviceOn)
         {
             var what = new List<string>();
-            if (enabledItems.Count > 0) what.Add("opens when you sign in");
-            if (autoServices.Count > 0) what.Add($"starts the {List(autoServices.Select(s => s.Name))} service with Windows");
-            help = $"{name} {string.Join(" and ", what)}. Switch off to stop that.";
+            if (runningServices.Count > 0) what.Add("is running");
+            if (autoServices.Count > 0) what.Add("starts with Windows");
+            var system = f.Services.Any(s => s.RunsAsSystem) ? ", which runs as SYSTEM," : "";
+            help = $"{serviceNames}{system} {string.Join(" and ", what)}. Switch off to stop it and keep it stopped.";
+        }
+        else if (kept.Count > 0)
+        {
+            help = kept.Any(s => s.Packaged && s.StartsWithWindows)
+                ? $"Revoke keeps {serviceNames} stopped. Windows only lets {name}'s installer change how it starts, so it still starts with Windows, and Revoke stops it each time. Features of {name} that need it won't work. Switch on to let it run."
+                : $"Revoke keeps {serviceNames} stopped. Features of {name} that need it won't work. Switch on to let it run.";
         }
         else
         {
-            help = changeable ? $"{name} doesn't start by itself. Switch on to let it again." : $"{name} has nothing that starts by itself.";
+            help = $"{serviceNames} is stopped and doesn't start with Windows. Switch on to start it.";
         }
-        cells[Pane.Startup] = new Cell(starts, false, changeable, startupAdmin, false, help);
+        var serviceAdmin = f.Services.Any(s => !s.Packaged);
+        cells[Pane.Service] = new Cell(serviceOn, false, f.Services.Count > 0, serviceAdmin, false, help,
+            Caution: !serviceOn && kept.Count > 0);
 
         // Privacy switches
         foreach (var pane in new[] { Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location })
@@ -353,7 +368,7 @@ public sealed class Model
         var helpers = f.Helpers.Select(h => facts.GetValueOrDefault(h)?.Name ?? FallbackName(h)).Distinct().ToList();
         return new Row(client, name, f.Publisher ?? "", f.Package?.Logo, watched, cells,
             f.Procs.Count + f.Helpers.Sum(h => facts.GetValueOrDefault(h)?.Procs.Count ?? 0),
-            f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.DisplayName).ToList(), helpers, DeadlineOf(f));
+            f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.Name).ToList(), helpers, DeadlineOf(f));
     }
 
     /// <summary>The programs a client's firewall rules should cover: the ones it has run,
@@ -446,15 +461,24 @@ public sealed class Model
                     else
                         Startup.Set(entry.Item, true);
                 }
-                foreach (var service in f.Services)
-                {
-                    if (Settings.ServiceStarts.TryGetValue(service.Name, out var start) && start != service.Start)
-                        ops.Add(new ElevatedOp.SetServiceStart(service.Name, start));
-                }
                 if (Elevated.Run(ops) is { } error) throw new InvalidOperationException(error);
+                return $"{name} opens when you sign in again";
+
+            case Pane.Service:
+                foreach (var service in f.Services) Settings.KeepStopped.Remove(service.Name);
+                Settings.Save();
+                // Back to how each started before Revoke changed it, where Revoke can change
+                // that at all (not packaged services).
+                var starts = f.Services
+                    .Where(s => !s.Packaged && Settings.ServiceStarts.TryGetValue(s.Name, out var start) && start != s.Start)
+                    .Select(s => (ElevatedOp)new ElevatedOp.SetServiceStart(s.Name, Settings.ServiceStarts[s.Name]))
+                    .ToList();
+                if (Elevated.Run(starts) is { } failure) throw new InvalidOperationException(failure);
                 foreach (var service in f.Services) Settings.ServiceStarts.Remove(service.Name);
                 Settings.Save();
-                return $"{name} starts by itself again";
+                // Start what any user may start; the rest starts with Windows, or when the app asks.
+                var started = f.Services.Where(s => s.StartsWithWindows || s.Packaged).Count(s => Services.TrySet(s.Name, running: true));
+                return started > 0 ? $"Started {List(f.Services.Select(s => s.Name))}" : $"{List(f.Services.Select(s => s.Name))} can run again";
 
             case Pane.Network:
                 var restore = new List<ElevatedOp> { new ElevatedOp.RemoveBlocks(client.Key) };
@@ -484,6 +508,7 @@ public sealed class Model
         var ops = new List<ElevatedOp>();
         var disabled = new List<(Client, List<string>)>();
         var serviceStarts = new List<(string, int)>();
+        var keepStopped = new List<string>();
         var killed = 0;
 
         foreach (var client in clients)
@@ -498,7 +523,6 @@ public sealed class Model
                         var (n, errs) = Processes.KillTree(f.Procs, self);
                         killed += n;
                         errors.AddRange(errs.Select(e => $"{name}: {e}"));
-                        ops.AddRange(f.Services.Where(s => s.Running).Select(s => new ElevatedOp.StopService(s.Name)));
                         break;
 
                     case Pane.Startup:
@@ -512,10 +536,22 @@ public sealed class Model
                             try { Startup.Set(entry.Item, false); }
                             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { errors.Add($"{name}: {e.Message}"); }
                         }
-                        foreach (var service in f.Services.Where(s => s.StartsWithWindows))
+                        break;
+
+                    case Pane.Service:
+                        foreach (var service in f.Services)
                         {
-                            ops.Add(new ElevatedOp.SetServiceStart(service.Name, 3));
-                            serviceStarts.Add((service.Name, service.Start));
+                            keepStopped.Add(service.Name);
+                            // Many services, and every packaged one, let any user stop them.
+                            if (service.Running && !Services.TrySet(service.Name, running: false))
+                                ops.Add(new ElevatedOp.StopService(service.Name));
+                            // Only Windows' package installer can change how a packaged service
+                            // starts, so Revoke keeps those stopped instead.
+                            if (service.StartsWithWindows && !service.Packaged)
+                            {
+                                ops.Add(new ElevatedOp.SetServiceStart(service.Name, 3));
+                                serviceStarts.Add((service.Name, service.Start));
+                            }
                         }
                         break;
 
@@ -538,6 +574,13 @@ public sealed class Model
                         break;
                 }
             }
+        }
+
+        if (keepStopped.Count > 0)
+        {
+            Settings.KeepStopped.UnionWith(keepStopped);
+            try { Settings.Save(); }
+            catch (IOException e) { errors.Add(e.Message); }
         }
 
         var skippedAdmin = false;
@@ -648,7 +691,7 @@ public sealed class Model
             if (row.Deadline is { } deadline && deadline <= now) due.Add((row.Client, "its time limit ran out"));
         }
 
-        Activity? activity = null;
+        Activity? activity = KeepServicesStopped();
         if (orphans.Count > 0)
         {
             var (n, _) = Processes.KillTree(orphans, self);
@@ -656,6 +699,25 @@ public sealed class Model
         }
         foreach (var (client, reason) in due) activity = Revoke([client], Automatic, reason, allowAdmin: false);
         return activity;
+    }
+
+    /// <summary>
+    /// Stops services switched off in Revoke that started again: at boot, or because their
+    /// app started them. As the user where Windows allows it, through the helper otherwise,
+    /// and never with a UAC prompt, which mustn't appear out of nowhere.
+    /// </summary>
+    Activity? KeepServicesStopped()
+    {
+        var started = services.Where(s => s.Running && Settings.KeepStopped.Contains(s.Name)).ToList();
+        if (started.Count == 0) return null;
+        var stopped = started.Where(s => Services.TrySet(s.Name, running: false)).Select(s => s.Name).ToList();
+        var rest = started.Where(s => !stopped.Contains(s.Name)).Select(s => (ElevatedOp)new ElevatedOp.StopService(s.Name)).ToList();
+        if (rest.Count > 0 && Helper.Send(rest) is { Error: null } reply)
+        {
+            stopped.AddRange(rest.Where((_, i) => !reply.Rejected.Contains(i)).Select(op => ((ElevatedOp.StopService)op).Name));
+        }
+        if (stopped.Count == 0) return null;
+        return LastActivity = Activity.Now($"Stopped {List(stopped)}, which Revoke keeps stopped");
     }
 
     /// <summary>The session locked or the PC is going to sleep.</summary>
@@ -677,6 +739,7 @@ public sealed class Model
     {
         Pane.Running => "Running",
         Pane.Startup => "Startup",
+        Pane.Service => "Service",
         Pane.Screen => "Screen capture",
         Pane.Camera => "Camera",
         Pane.Microphone => "Microphone",

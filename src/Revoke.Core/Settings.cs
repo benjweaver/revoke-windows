@@ -23,10 +23,14 @@ public sealed class Settings
     public Dictionary<string, List<string>> DisabledRules { get; set; } = [];
     /// <summary>How services started before Revoke changed them.</summary>
     public Dictionary<string, int> ServiceStarts { get; set; } = [];
+    /// <summary>Services switched off in Revoke, which it stops whenever they start.</summary>
+    public HashSet<string> KeepStopped { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>The time limit never counts from before it was switched on.</summary>
     public DateTimeOffset LimitStart { get; set; }
     /// <summary>Settings open by themselves only the first time, to set Revoke up.</summary>
     public bool SetUp { get; set; }
+    /// <summary>Confirm before stopping an app's service, which can break the app.</summary>
+    public bool AskBeforeStoppingServices { get; set; } = true;
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
