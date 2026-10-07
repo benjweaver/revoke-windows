@@ -289,6 +289,10 @@ static partial class Installer
                 try { Directory.Delete(folder, recursive: true); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Thread.Sleep(250); }
             }
+            // Leave the firewall as it was: rules it switched off back on, and its own rules gone.
+            var state = HelperState.Load();
+            failures.AddRange(AdminChanges.Apply(state.DisabledRules.Select(id => (ElevatedOp)new ElevatedOp.SetRuleEnabled(id, true))));
+            if (AdminChanges.RemoveAllRules() is { } error) failures.Add(error);
             if (Directory.Exists(Helper.StateFolder)) Directory.Delete(Helper.StateFolder, recursive: true);
         }
         catch (Exception e) when (e is Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException

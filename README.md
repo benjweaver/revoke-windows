@@ -8,6 +8,32 @@ themselves, and closes the firewall rules that let your network reach them.
 It's the Windows counterpart of [Revoke for macOS](https://github.com/benjweaver/revoke),
 built natively with WinUI 3.
 
+## Install
+
+In PowerShell, for your user, with no admin rights:
+
+```powershell
+irm https://raw.githubusercontent.com/benjweaver/revoke-windows/main/packaging/windows/install.ps1 | iex
+```
+
+Revoke goes in `%LOCALAPPDATA%\Programs\Revoke`, with a Start menu shortcut, and
+starts in the notification area. The script checks the download against its
+checksum before installing. Windows 10 2004 or later, x64 (ARM64 runs the x64 build).
+
+To update to the latest release:
+
+```powershell
+irm https://raw.githubusercontent.com/benjweaver/revoke-windows/main/packaging/windows/update.ps1 | iex
+```
+
+To uninstall, which also removes the admin helper if it's installed (asking for admin
+once), puts back the firewall rules Revoke switched off and deletes its own, and keeps
+your settings in `%APPDATA%\Revoke`:
+
+```powershell
+irm https://raw.githubusercontent.com/benjweaver/revoke-windows/main/packaging/windows/uninstall.ps1 | iex
+```
+
 ## Why it stops apps
 
 macOS gates screen recording and input control behind permissions only System Settings
@@ -132,8 +158,7 @@ dotnet test --project tests/Revoke.Core.Tests
 dotnet publish src/Revoke -c Release -o publish
 ```
 
-To build a release and install it for your user, in `%LOCALAPPDATA%\Programs\Revoke` with a
-Start menu shortcut and no admin rights:
+To build this checkout and install it the same way the release installs:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
@@ -145,6 +170,14 @@ on a PC without either installed. Building the app also publishes the helper
 `scripts/make-icons.py` redraws the tray icons.
 
 The tests only read your PC, except for stopping processes they start themselves.
+
+## Release
+
+Bump `<Version>` in `Directory.Build.props`, add the version's section to
+`CHANGELOG.md`, then commit and push. `scripts\release.ps1` does the rest: it builds the
+app, zips it with a `SHA256SUMS` file, and publishes a GitHub release with that
+changelog section as its notes, which the install script then finds. It needs the
+GitHub CLI, signed in.
 
 ## License
 

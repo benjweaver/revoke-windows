@@ -106,8 +106,23 @@ public static partial class AdminChanges
         }
     }
 
-    /// <summary>Deletes Revoke's rules with this description, each by its own ID.</summary>
-    static void RemoveBlocks(string description)
+    /// <summary>Deletes every firewall rule Revoke added, as when removing the helper.
+    /// Returns why it couldn't, or null.</summary>
+    public static string? RemoveAllRules()
+    {
+        try
+        {
+            RemoveBlocks(null);
+            return null;
+        }
+        catch (Exception e) when (e is ManagementException or COMException or UnauthorizedAccessException)
+        {
+            return $"Remove Revoke's firewall rules: {e.Message.Trim()}";
+        }
+    }
+
+    /// <summary>Deletes Revoke's rules with this description, or all of them, each by its own ID.</summary>
+    static void RemoveBlocks(string? description)
     {
         using var searcher = new ManagementObjectSearcher(new ManagementScope(FirewallNamespace),
             new ObjectQuery($"SELECT * FROM MSFT_NetFirewallRule WHERE RuleGroup = '{Firewall.Group}'"));
@@ -115,7 +130,7 @@ public static partial class AdminChanges
         {
             using (rule)
             {
-                if (rule["Description"] as string == description) rule.Delete();
+                if (description is null || rule["Description"] as string == description) rule.Delete();
             }
         }
     }
