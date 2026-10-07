@@ -1,0 +1,724 @@
+using System.Diagnostics;
+
+namespace Revoke.Core;
+
+/// <summary>A column in the panel.</summary>
+public enum Pane { Running, Startup, Screen, Camera, Microphone, Location, Network }
+
+/// <param name="On">Orange: the app can do this now.</param>
+/// <param name="InUse">Doing it this moment (camera, microphone, location, screen capture).</param>
+/// <param name="Enabled">Whether the switch does anything. Off for things Windows doesn't let
+/// one app change, like a desktop program's camera access.</param>
+/// <param name="NeedsAdmin">Switching it raises the admin prompt.</param>
+/// <param name="Stale">Revoke blocked it, but the app has updated since and the block no longer
+/// covers the new version.</param>
+public sealed record Cell(bool On, bool InUse, bool Enabled, bool NeedsAdmin, bool Stale, string Help);
+
+/// <param name="Icon">The app's logo file, for packaged apps.</param>
+/// <param name="Deadline">When the time limit will stop it.</param>
+public sealed record Row(
+    Client Client,
+    string Name,
+    string Publisher,
+    string? Icon,
+    bool Watched,
+    IReadOnlyDictionary<Pane, Cell> Cells,
+    int Processes,
+    bool HasWindow,
+    IReadOnlyList<string> Services,
+    IReadOnlyList<string> Helpers,
+    DateTimeOffset? Deadline)
+{
+    public bool IsOn(Pane pane) => Cells.TryGetValue(pane, out var cell) && cell.On;
+}
+
+/// <param name="Exposed">Any watched app running or able to capture the screen: the tray lock opens.</param>
+public sealed record Snapshot(IReadOnlyList<Row> Watched, IReadOnlyList<Row> Others, bool CanReadFirewall, string Status, bool Exposed)
+{
+    public static readonly Snapshot Empty = new([], [], true, "Reading…", false);
+
+    public IEnumerable<Row> AllRows => Watched.Concat(Others);
+}
+
+public sealed record Activity(DateTimeOffset At, string Text, bool IsError)
+{
+    public static Activity Now(string text, bool isError = false) => new(DateTimeOffset.Now, text, isError);
+}
+
+public sealed record KnownApp(Client Client, string Name, string Publisher, bool Watched, string? Icon);
+
+/// <summary>What every source says right now, gathered into one row per app, and
+/// everything that revokes access. Not thread-safe: one caller at a time.</summary>
+public sealed class Model
+{
+    public static readonly Pane[] AllPanes = Enum.GetValues<Pane>();
+
+    /// <summary>What automatic revocations take away: everything that needs no admin prompt.</summary>
+    static readonly Pane[] Automatic = [Pane.Running, Pane.Startup, Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location];
+
+    /// <summary>Facts about a client gathered from every source.</summary>
+    sealed class Facts
+    {
+        public string? Name;
+        public string? Publisher;
+        public Package? Package;
+        public List<Proc> Procs = [];
+        public Dictionary<Capability, ConsentEntry> Consent = [];
+        public List<StartupEntry> Startup = [];
+        public List<Service> Services = [];
+        public List<FirewallRule> Inbound = [];
+        public List<FirewallRule> Blocks = [];
+        /// <summary>Programs that belong to the client, for firewall rules.</summary>
+        public HashSet<string> Programs = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Watched programs this app started, which show in its row rather than their own.</summary>
+        public List<Client> Helpers = [];
+        public Client? HelperOf;
+    }
+
+    /// <summary>Per-client memory between ticks, for the automatic revocations.</summary>
+    sealed class Watch
+    {
+        public bool HadWindow;
+        public int WindowlessTicks;
+        /// <summary>Everything the client was running last tick, and what those started, so
+        /// helpers it leaves behind when it quits can be stopped too.</summary>
+        public List<Proc> Tree = [];
+    }
+
+    public Settings Settings { get; }
+    public Snapshot Snapshot { get; private set; } = Snapshot.Empty;
+    public Activity? LastActivity { get; private set; }
+
+    List<Package> packages = [];
+    List<Service> services = [];
+    DateTime packagesRead = DateTime.MinValue;
+    readonly Dictionary<string, string?> signers = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, string?> descriptions = new(StringComparer.OrdinalIgnoreCase);
+    SortedDictionary<Client, Facts> facts = [];
+    List<Proc> procs = [];
+    HashSet<uint> windows = [];
+    readonly Dictionary<Client, Watch> watches = [];
+    readonly uint self = (uint)Environment.ProcessId;
+
+    public Model(Settings? settings = null)
+    {
+        Settings = settings ?? Settings.Load();
+        Refresh(force: true);
+    }
+
+    // Reading
+
+    /// <summary>Reads everything again. Packages and services change rarely and are read at
+    /// most once a minute unless forced.</summary>
+    public void Refresh(bool force = false)
+    {
+        if (force || DateTime.UtcNow - packagesRead > TimeSpan.FromMinutes(1))
+        {
+            packages = Packages.Installed();
+            services = Services.Read();
+            packagesRead = DateTime.UtcNow;
+        }
+        services = Services.WithStatus(services);
+        procs = Processes.List();
+        windows = Processes.WithWindows();
+
+        var all = new SortedDictionary<Client, Facts>();
+        Facts For(Client client) => all.TryGetValue(client, out var f) ? f : all[client] = new Facts();
+
+        foreach (var package in packages)
+        {
+            var f = For(Client.Package(package.Family));
+            f.Name = package.Name;
+            f.Publisher = package.Publisher;
+            f.Package = package;
+            foreach (var exe in package.Executables) f.Programs.Add(Path.Combine(package.InstallPath, exe));
+        }
+        var windowsDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        foreach (var proc in procs)
+        {
+            if (proc.Pid == self) continue;
+            Client client;
+            if (proc.Family is { } family) client = Client.Package(family);
+            else if (proc.Path is { } path && !path.StartsWith(windowsDir, StringComparison.OrdinalIgnoreCase)) client = Client.FromPath(path);
+            else continue;
+            var f = For(client);
+            if (proc.Path is { } p) f.Programs.Add(p);
+            f.Procs.Add(proc);
+        }
+        var consent = Consent.Read();
+        foreach (var (client, entries) in consent.Entries) For(client).Consent = entries;
+        foreach (var entry in Startup.Read(packages)) For(entry.Client).Startup.Add(entry);
+        foreach (var service in services)
+        {
+            var f = For(service.Client);
+            f.Programs.Add(service.Program);
+            f.Services.Add(service);
+        }
+        var rules = Firewall.Read();
+        foreach (var rule in rules ?? [])
+        {
+            if (rule.RevokeClient is { } client)
+            {
+                For(client).Blocks.Add(rule);
+            }
+            else if (rule.Inbound && rule.Allow && rule.Program is { } program)
+            {
+                var f = For(Client.FromPath(program));
+                if (File.Exists(program)) f.Programs.Add(program);
+                f.Inbound.Add(rule);
+            }
+        }
+        // Rules Revoke switched off no longer show as active, but stay this client's.
+        foreach (var (key, f) in all)
+        {
+            var ours = Settings.DisabledRules.GetValueOrDefault(key.Key) ?? [];
+            f.Inbound.RemoveAll(r => !r.Active && !ours.Contains(r.Id));
+        }
+
+        // Desktop programs get their name and developer from their files.
+        foreach (var (client, f) in all)
+        {
+            if (f.Package is not null) continue;
+            var path = f.Procs.Select(p => p.Path).FirstOrDefault(p => p is not null) ?? f.Programs.FirstOrDefault();
+            if (path is null) continue;
+            if (!signers.TryGetValue(path, out var publisher)) signers[path] = publisher = Signer.Organization(path);
+            f.Publisher = publisher;
+            f.Name = KnownName(path) ?? Description(path) ?? FallbackName(client);
+        }
+        FoldHelpers(all);
+        blockedPrograms = (rules ?? []).Where(r => r.RevokeClient is not null && r.Active && r.Program is not null)
+            .Select(r => r.Program!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        facts = all;
+        Snapshot = Build(rules is not null, consent.GloballyOn);
+    }
+
+    HashSet<string> blockedPrograms = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Agents start helpers of their own (Codex runs node, node_repl and a code-mode
+    /// host, all signed by OpenAI). A watched program whose every process was started by
+    /// another watched app is that app's helper: it's stopped along with the app, so it
+    /// shows in the app's row. Once the app quits, a helper still running gets its own row.
+    /// </summary>
+    void FoldHelpers(SortedDictionary<Client, Facts> all)
+    {
+        var watched = all.Where(kv => Settings.IsWatched(kv.Key, kv.Value.Publisher ?? "") && kv.Value.Procs.Count > 0).ToList();
+        foreach (var (client, f) in watched)
+        {
+            if (client.Kind != ClientKind.Exe || f.Startup.Count > 0 || f.Services.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0)
+                continue;
+            var pids = f.Procs.Select(p => p.Pid).ToHashSet();
+            // The app furthest up the tree wins, so Codex's helpers fold into ChatGPT when ChatGPT started Codex.
+            Client? owner = null;
+            var ownerSize = -1;
+            foreach (var (other, of) in watched)
+            {
+                if (other == client) continue;
+                var below = Processes.Descendants(procs, of.Procs.Select(p => p.Pid).ToHashSet());
+                if (pids.IsSubsetOf(below) && below.Count > ownerSize)
+                {
+                    owner = other;
+                    ownerSize = below.Count;
+                }
+            }
+            if (owner is null) continue;
+            f.HelperOf = owner;
+            all[owner].Helpers.Add(client);
+        }
+        // A helper's helpers belong to the top app too.
+        foreach (var (_, f) in all)
+        {
+            while (f.HelperOf is { } up && all[up].HelperOf is { } top) f.HelperOf = top;
+        }
+        foreach (var (_, f) in all) f.Helpers.Clear();
+        foreach (var (client, f) in all)
+        {
+            if (f.HelperOf is { } owner) all[owner].Helpers.Add(client);
+        }
+    }
+
+    Snapshot Build(bool canReadFirewall, Dictionary<Capability, bool> globallyOn)
+    {
+        var watched = new List<Row>();
+        var others = new List<Row>();
+        foreach (var (client, f) in facts)
+        {
+            var isWatched = Settings.IsWatched(client, f.Publisher ?? "");
+            var screenAllowed = f.Consent.TryGetValue(Capability.ScreenCapture, out var screen) && screen.Access == Access.Allowed && !screen.Shared;
+            // Desktop programs that have only ever touched the shared switches, and aren't
+            // running, have nothing left to revoke.
+            var present = f.Package is not null || f.Procs.Count > 0 || f.Startup.Count > 0 || f.Services.Count > 0
+                || f.Inbound.Count > 0 || f.Blocks.Count > 0;
+            if (!present || !(isWatched || screenAllowed) || f.HelperOf is not null) continue;
+            (isWatched ? watched : others).Add(MakeRow(client, f, isWatched, globallyOn));
+        }
+        watched.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+        others.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+        var exposed = watched.Where(r => r.IsOn(Pane.Running) || r.IsOn(Pane.Screen)).Select(r => r.Name).ToList();
+        var status = exposed.Count switch
+        {
+            0 => "Watched apps are stopped",
+            1 => $"{exposed[0]} is running",
+            _ => $"{List(exposed)} are running",
+        };
+        return new Snapshot(watched, others, canReadFirewall, status, exposed.Count > 0);
+    }
+
+    Row MakeRow(Client client, Facts f, bool watched, Dictionary<Capability, bool> globallyOn)
+    {
+        var name = f.Name ?? FallbackName(client);
+        var packaged = f.Package is not null;
+        var cells = new Dictionary<Pane, Cell>();
+
+        // Running
+        var runningServices = f.Services.Where(s => s.Running).ToList();
+        var running = f.Procs.Count > 0 || runningServices.Count > 0;
+        string help;
+        if (running)
+        {
+            var parts = new List<string> { $"{f.Procs.Count} process{(f.Procs.Count == 1 ? "" : "es")}" };
+            if (runningServices.Count > 0) parts.Add($"the {List(runningServices.Select(s => s.Name))} service");
+            help = $"{name} is running ({string.Join(" and ", parts)}). Switch off to stop it and everything it started.";
+            if (runningServices.Count > 0) help += " Stopping its service needs admin.";
+        }
+        else
+        {
+            help = packaged ? $"{name} isn't running. Switch on to open it." : $"{name} isn't running.";
+        }
+        cells[Pane.Running] = new Cell(running, false, running || packaged, runningServices.Count > 0, false, help);
+
+        // Startup
+        var enabledItems = f.Startup.Where(e => e.Enabled).ToList();
+        var autoServices = f.Services.Where(s => s.StartsWithWindows).ToList();
+        var starts = enabledItems.Count > 0 || autoServices.Count > 0;
+        var changeable = f.Startup.Count > 0 || f.Services.Count > 0;
+        var startupAdmin = autoServices.Count > 0 || enabledItems.Any(e => e.Item is StartupItem.Run { Machine: true });
+        if (starts)
+        {
+            var what = new List<string>();
+            if (enabledItems.Count > 0) what.Add("opens when you sign in");
+            if (autoServices.Count > 0) what.Add($"starts the {List(autoServices.Select(s => s.Name))} service with Windows");
+            help = $"{name} {string.Join(" and ", what)}. Switch off to stop that.";
+        }
+        else
+        {
+            help = changeable ? $"{name} doesn't start by itself. Switch on to let it again." : $"{name} has nothing that starts by itself.";
+        }
+        cells[Pane.Startup] = new Cell(starts, false, changeable, startupAdmin, false, help);
+
+        // Privacy switches
+        foreach (var pane in new[] { Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location })
+        {
+            var capability = CapabilityOf(pane)!.Value;
+            var entry = f.Consent.GetValueOrDefault(capability) ?? new ConsentEntry(Access.Unset, false, false, null);
+            var global = globallyOn.GetValueOrDefault(capability, true);
+            var what = Title(pane).ToLowerInvariant();
+            if (!packaged)
+            {
+                cells[pane] = new Cell(false, entry.InUse, false, false, false, entry.InUse
+                    ? $"{name} is using the {what} now. Windows has one switch for all desktop apps, so Revoke can't switch off {name} alone; stopping it ends the use."
+                    : $"Windows has one {what} switch for all desktop apps, so this can only be changed for every desktop app at once, in Settings.");
+                continue;
+            }
+            help = entry.Access switch
+            {
+                _ when entry.InUse => $"{name} is using the {what} now. Switch off to revoke it.",
+                Access.Allowed when global => $"{name} has {what} access. Switch off to revoke it.",
+                Access.Allowed => $"{name} is allowed, but {what} is switched off for all apps.",
+                Access.Ask => $"Windows asks before {name} can use the {what}. Switch off to deny it outright, or on to open Settings.",
+                Access.Denied => $"Off. Switching on opens Settings, where only you can grant {what} access.",
+                _ => $"{name} hasn't asked for {what} access. Switching on opens Settings.",
+            };
+            cells[pane] = new Cell(entry.Access == Access.Allowed && global, entry.InUse, true, false, false, help);
+        }
+
+        // Local network: blocked once Revoke's rules cover every program, including the
+        // helpers', whichever row added them.
+        var activeInbound = f.Inbound.Where(r => r.Active).ToList();
+        var programs = ProgramsOf(client, f);
+        var covered = programs.Count(blockedPrograms.Contains);
+        var blocked = f.Blocks.Count > 0 || (programs.Count > 0 && covered == programs.Count);
+        var stale = blocked && covered < programs.Count;
+        var networkOn = activeInbound.Count > 0 || !blocked;
+        if (stale)
+            help = $"{name} has updated since Revoke blocked it, and the block doesn't cover the new version. Switch off to block it again.";
+        else if (blocked && activeInbound.Count == 0)
+            help = $"Revoke keeps {name} off your local network. Switch on to stop blocking it.";
+        else if (activeInbound.Count > 0)
+            help = $"Devices on your network can connect to {name} ({activeInbound.Count} firewall rule{(activeInbound.Count == 1 ? "" : "s")}). Switch off to close those and keep it off your local network.";
+        else
+            help = $"{name} can reach devices on your local network. Switch off to block it.";
+        cells[Pane.Network] = new Cell(networkOn || stale, false, programs.Count > 0 || blocked, true, stale, help);
+
+        var helpers = f.Helpers.Select(h => facts.GetValueOrDefault(h)?.Name ?? FallbackName(h)).Distinct().ToList();
+        return new Row(client, name, f.Publisher ?? "", f.Package?.Logo, watched, cells,
+            f.Procs.Count + f.Helpers.Sum(h => facts.GetValueOrDefault(h)?.Procs.Count ?? 0),
+            f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.DisplayName).ToList(), helpers, DeadlineOf(f));
+    }
+
+    /// <summary>The programs a client's firewall rules should cover: the ones it has run,
+    /// declares, or has rules for, that exist now. For a desktop program that updates
+    /// into new folders, every version that's there.</summary>
+    List<string> ProgramsOf(Client client, Facts f)
+    {
+        var programs = (client.Kind == ClientKind.Package ? f.Programs.Where(client.MatchesPath) : Client.Expand(client.Id))
+            .Concat(f.Helpers.SelectMany(h => Client.Expand(h.Id)));
+        return programs.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    DateTimeOffset? DeadlineOf(Facts f)
+    {
+        if (!Settings.RevokeAfterLimit) return null;
+        var starts = f.Procs.Where(p => p.Started != 0).Select(p => p.Started).ToList();
+        if (starts.Count == 0) return null;
+        var started = Processes.Time(starts.Min());
+        if (Settings.LimitStart > started) started = Settings.LimitStart;
+        return started.AddMinutes(Settings.LimitMinutes);
+    }
+
+    public Row? RowFor(Client client) => Snapshot.AllRows.FirstOrDefault(r => r.Client == client);
+
+    string DisplayName(Client client) => RowFor(client)?.Name ?? facts.GetValueOrDefault(client)?.Name ?? FallbackName(client);
+
+    /// <summary>Apps the settings window can offer to watch: watched ones, apps with windows
+    /// open, and packaged apps with anything in the lists.</summary>
+    public List<KnownApp> KnownApps() => facts
+        .Where(kv =>
+        {
+            var (client, f) = (kv.Key, kv.Value);
+            return Settings.IsWatched(client, f.Publisher ?? "") || Settings.Removed.Contains(client.Key)
+                || f.Procs.Any(p => windows.Contains(p.Pid))
+                || (f.Package is not null && (f.Consent.Count > 0 || f.Startup.Count > 0 || f.Inbound.Count > 0));
+        })
+        .Select(kv => new KnownApp(kv.Key, kv.Value.Name ?? FallbackName(kv.Key), kv.Value.Publisher ?? "",
+            Settings.IsWatched(kv.Key, kv.Value.Publisher ?? ""), kv.Value.Package?.Logo))
+        .OrderByDescending(a => a.Watched)
+        .ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
+        .ToList();
+
+    public void SetWatched(Client client, bool watched)
+    {
+        Settings.SetWatched(client, facts.GetValueOrDefault(client)?.Publisher ?? "", watched);
+        Settings.Save();
+        Refresh();
+    }
+
+    // Changing access
+
+    /// <summary>A switch in the panel. Granting a privacy switch opens Settings, where only
+    /// the person can grant access, as on macOS.</summary>
+    public Activity Set(Client client, Pane pane, bool on)
+    {
+        if (!on) return Revoke([client], [pane], null, allowAdmin: true);
+        string text;
+        var isError = false;
+        try
+        {
+            text = Grant(client, pane);
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            text = $"Couldn't switch on {Title(pane).ToLowerInvariant()} for {DisplayName(client)}: {e.Message}";
+            isError = true;
+        }
+        Refresh(force: true);
+        return LastActivity = Activity.Now(text, isError);
+    }
+
+    string Grant(Client client, Pane pane)
+    {
+        var name = DisplayName(client);
+        var f = facts.GetValueOrDefault(client) ?? throw new InvalidOperationException("Revoke can't find it any more.");
+        switch (pane)
+        {
+            case Pane.Running:
+                var package = f.Package ?? throw new InvalidOperationException("Only packaged apps can be opened from here.");
+                var app = package.Apps.FirstOrDefault() ?? throw new InvalidOperationException("It has no app to open.");
+                Open($@"shell:AppsFolder\{package.Family}!{app}");
+                return $"Opened {name}";
+
+            case Pane.Startup:
+                var ops = new List<ElevatedOp>();
+                foreach (var entry in f.Startup)
+                {
+                    if (entry.Item is StartupItem.Run { Machine: true } run)
+                        ops.Add(new ElevatedOp.SetMachineStartup(Startup.MachineApprovalPath(run.Wow64), run.Name, true));
+                    else
+                        Startup.Set(entry.Item, true);
+                }
+                foreach (var service in f.Services)
+                {
+                    if (Settings.ServiceStarts.TryGetValue(service.Name, out var start) && start != service.Start)
+                        ops.Add(new ElevatedOp.SetServiceStart(service.Name, start));
+                }
+                if (Elevated.Run(ops) is { } error) throw new InvalidOperationException(error);
+                foreach (var service in f.Services) Settings.ServiceStarts.Remove(service.Name);
+                Settings.Save();
+                return $"{name} starts by itself again";
+
+            case Pane.Network:
+                var restore = new List<ElevatedOp> { new ElevatedOp.RemoveBlocks(client.Key) };
+                restore.AddRange((Settings.DisabledRules.GetValueOrDefault(client.Key) ?? []).Select(id => new ElevatedOp.SetRuleEnabled(id, true)));
+                if (Elevated.Run(restore) is { } failed) throw new InvalidOperationException(failed);
+                Settings.DisabledRules.Remove(client.Key);
+                Settings.Save();
+                return $"Stopped blocking the local network for {name}";
+
+            default:
+                Open(Consent.SettingsUri(CapabilityOf(pane)!.Value));
+                return $"Opened Settings to grant {Title(pane).ToLowerInvariant()} access";
+        }
+    }
+
+    /// <summary>
+    /// Revokes <paramref name="panes"/> for every client. Parts that need admin rights are
+    /// gathered into one prompt, or skipped when <paramref name="allowAdmin"/> is false, as
+    /// for the automatic revocations, which shouldn't raise a prompt out of nowhere.
+    /// <paramref name="reason"/> finishes "… when …"; null means the person asked.
+    /// </summary>
+    public Activity Revoke(IReadOnlyList<Client> clients, IReadOnlyList<Pane> panes, string? reason, bool allowAdmin)
+    {
+        Refresh(force: true);
+        var before = clients.Select(RowFor).OfType<Row>().ToDictionary(r => r.Client);
+        var errors = new List<string>();
+        var ops = new List<ElevatedOp>();
+        var disabled = new List<(Client, List<string>)>();
+        var serviceStarts = new List<(string, int)>();
+        var killed = 0;
+
+        foreach (var client in clients)
+        {
+            var name = DisplayName(client);
+            if (!facts.TryGetValue(client, out var f)) continue;
+            foreach (var pane in panes)
+            {
+                switch (pane)
+                {
+                    case Pane.Running:
+                        var (n, errs) = Processes.KillTree(f.Procs, self);
+                        killed += n;
+                        errors.AddRange(errs.Select(e => $"{name}: {e}"));
+                        ops.AddRange(f.Services.Where(s => s.Running).Select(s => new ElevatedOp.StopService(s.Name)));
+                        break;
+
+                    case Pane.Startup:
+                        foreach (var entry in f.Startup.Where(e => e.Enabled))
+                        {
+                            if (entry.Item is StartupItem.Run { Machine: true } run)
+                            {
+                                ops.Add(new ElevatedOp.SetMachineStartup(Startup.MachineApprovalPath(run.Wow64), run.Name, false));
+                                continue;
+                            }
+                            try { Startup.Set(entry.Item, false); }
+                            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { errors.Add($"{name}: {e.Message}"); }
+                        }
+                        foreach (var service in f.Services.Where(s => s.StartsWithWindows))
+                        {
+                            ops.Add(new ElevatedOp.SetServiceStart(service.Name, 3));
+                            serviceStarts.Add((service.Name, service.Start));
+                        }
+                        break;
+
+                    case Pane.Network:
+                        var active = f.Inbound.Where(r => r.Active).Select(r => r.Id).ToList();
+                        ops.AddRange(active.Select(id => new ElevatedOp.SetRuleEnabled(id, false)));
+                        // Rebuilt whole, so an update's new programs are covered.
+                        ops.Add(new ElevatedOp.RemoveBlocks(client.Key));
+                        ops.AddRange(ProgramsOf(client, f).Select(p => new ElevatedOp.BlockLocalNetwork(client.Key, name, p)));
+                        if (active.Count > 0) disabled.Add((client, active));
+                        break;
+
+                    default:
+                        if (client.Family is not { } family) break;
+                        var capability = CapabilityOf(pane)!.Value;
+                        // Nothing to take away from an app that never asked.
+                        if (!f.Consent.TryGetValue(capability, out var consent) || consent.Access is Access.Denied or Access.Unset) break;
+                        try { Consent.Deny(family, capability); }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { errors.Add($"{name}: {e.Message}"); }
+                        break;
+                }
+            }
+        }
+
+        var skippedAdmin = false;
+        if (ops.Count > 0)
+        {
+            if (!allowAdmin)
+            {
+                skippedAdmin = true;
+            }
+            else if (Elevated.Run(ops) is { } error)
+            {
+                errors.Add(error);
+            }
+            else
+            {
+                foreach (var (client, ids) in disabled)
+                {
+                    var list = Settings.DisabledRules.TryGetValue(client.Key, out var l) ? l : Settings.DisabledRules[client.Key] = [];
+                    list.AddRange(ids.Except(list).ToList());
+                }
+                foreach (var (service, start) in serviceStarts) Settings.ServiceStarts.TryAdd(service, start);
+                try { Settings.Save(); }
+                catch (IOException e) { errors.Add(e.Message); }
+            }
+        }
+
+        Refresh(force: true);
+        var revoked = clients
+            .Where(before.ContainsKey)
+            .Where(c =>
+            {
+                var old = before[c];
+                var now = RowFor(c);
+                return panes.Any(p => old.IsOn(p) && now?.IsOn(p) != true) || (panes.Contains(Pane.Running) && old.Processes > 0);
+            })
+            .Select(c => before[c].Name)
+            .ToList();
+        var what = panes.Count == 1 ? Title(panes[0]).ToLowerInvariant() : "access";
+        string text;
+        if (errors.Count > 0)
+        {
+            text = $"Couldn't revoke {what}: {errors[0]}";
+        }
+        else if (revoked.Count == 0)
+        {
+            // Automatic runs often find nothing to do; only answer a click.
+            if (reason is not null) return LastActivity ?? Activity.Now("");
+            text = "Nothing to revoke";
+        }
+        else if (panes is [Pane.Running])
+        {
+            text = $"Stopped {List(revoked)}{(killed > 0 ? $" ({killed} processes)" : "")}";
+        }
+        else
+        {
+            text = $"Revoked {what} for {List(revoked)}";
+        }
+        if (reason is not null) text += $" when {reason}";
+        if (skippedAdmin) text += ". Services and firewall rules need you to click Revoke All";
+        return LastActivity = Activity.Now(text, errors.Count > 0);
+    }
+
+    /// <summary>Stops and revokes everything for every watched app.</summary>
+    public Activity RevokeAll() => Revoke(Snapshot.Watched.Select(r => r.Client).ToList(), AllPanes, null, allowAdmin: true);
+
+    // Automatic revoking
+
+    /// <summary>Runs every couple of seconds: refreshes, then revokes what the settings say
+    /// should go. Returns what it did, if anything.</summary>
+    public Activity? Tick()
+    {
+        Refresh();
+        var due = new List<(Client, string)>();
+        var orphans = new List<Proc>();
+        var now = DateTimeOffset.Now;
+        var alive = procs.Select(p => (p.Pid, p.Started)).ToHashSet();
+
+        foreach (var row in Snapshot.Watched)
+        {
+            var own = facts.GetValueOrDefault(row.Client)?.Procs ?? [];
+            var roots = own.Select(p => p.Pid).ToHashSet();
+            var below = Processes.Descendants(procs, roots);
+            var watch = watches.TryGetValue(row.Client, out var w) ? w : watches[row.Client] = new Watch();
+
+            if (Settings.RevokeOnClose)
+            {
+                if (own.Count == 0)
+                {
+                    // It quit. Whatever it started that's still running was left behind.
+                    if (watch.HadWindow) orphans.AddRange(watch.Tree.Where(p => alive.Contains((p.Pid, p.Started))));
+                    watch.HadWindow = false;
+                    watch.WindowlessTicks = 0;
+                }
+                else if (row.HasWindow)
+                {
+                    watch.HadWindow = true;
+                    watch.WindowlessTicks = 0;
+                }
+                else if (watch.HadWindow && ++watch.WindowlessTicks >= 2)
+                {
+                    // Two ticks without a window, so a window being replaced doesn't count.
+                    watch.HadWindow = false;
+                    due.Add((row.Client, "its last window closed"));
+                }
+            }
+            watch.Tree = procs.Where(p => roots.Contains(p.Pid) || below.Contains(p.Pid)).ToList();
+
+            if (row.Deadline is { } deadline && deadline <= now) due.Add((row.Client, "its time limit ran out"));
+        }
+
+        Activity? activity = null;
+        if (orphans.Count > 0)
+        {
+            var (n, _) = Processes.KillTree(orphans, self);
+            if (n > 0) activity = LastActivity = Activity.Now($"Stopped {n} process{(n == 1 ? "" : "es")} a watched app left running when it quit");
+        }
+        foreach (var (client, reason) in due) activity = Revoke([client], Automatic, reason, allowAdmin: false);
+        return activity;
+    }
+
+    /// <summary>The session locked or the PC is going to sleep.</summary>
+    public Activity? Locked(string reason) =>
+        Settings.RevokeOnLock ? Revoke(Snapshot.Watched.Select(r => r.Client).ToList(), Automatic, reason, allowAdmin: false) : null;
+
+    // Helpers
+
+    public static Capability? CapabilityOf(Pane pane) => pane switch
+    {
+        Pane.Screen => Capability.ScreenCapture,
+        Pane.Camera => Capability.Camera,
+        Pane.Microphone => Capability.Microphone,
+        Pane.Location => Capability.Location,
+        _ => null,
+    };
+
+    public static string Title(Pane pane) => pane switch
+    {
+        Pane.Running => "Running",
+        Pane.Startup => "Startup",
+        Pane.Screen => "Screen capture",
+        Pane.Camera => "Camera",
+        Pane.Microphone => "Microphone",
+        Pane.Location => "Location",
+        _ => "Local network",
+    };
+
+    static void Open(string target) => Process.Start(new ProcessStartInfo("explorer.exe", target) { UseShellExecute = false });
+
+    static string FallbackName(Client client) => client.Kind == ClientKind.Package
+        ? client.Id.Split('_')[0]
+        : Path.GetFileNameWithoutExtension(client.Id.Split('\\')[^1]);
+
+    /// <summary>Clearer names for programs whose own names are confusing in a list.</summary>
+    internal static string? KnownName(string path)
+    {
+        var pattern = Client.Pattern(path);
+        if (pattern.EndsWith(@"\claude\claude-code\*\claude.exe") || pattern.EndsWith(@"\.local\bin\claude.exe")) return "Claude Code";
+        if (pattern.EndsWith(@"\openai\codex\bin\*\codex.exe")) return "Codex CLI";
+        if (pattern.EndsWith(@"\codex-computer-use-swift.exe")) return "Codex Computer Use";
+        return null;
+    }
+
+    /// <summary>The program's description, as Task Manager shows it.</summary>
+    string? Description(string path)
+    {
+        if (descriptions.TryGetValue(path, out var cached)) return cached;
+        string? description = null;
+        try { description = FileVersionInfo.GetVersionInfo(path).FileDescription?.Trim(); }
+        catch (FileNotFoundException) { }
+        return descriptions[path] = string.IsNullOrEmpty(description) ? null : description;
+    }
+
+    /// <summary>"A", "A and B", "A, B and C".</summary>
+    public static string List(IEnumerable<string> items)
+    {
+        var list = items.ToList();
+        return list.Count switch
+        {
+            0 => "",
+            1 => list[0],
+            _ => $"{string.Join(", ", list[..^1])} and {list[^1]}",
+        };
+    }
+}
