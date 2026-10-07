@@ -28,7 +28,8 @@ public sealed record Row(
     bool HasWindow,
     IReadOnlyList<string> Services,
     IReadOnlyList<string> Helpers,
-    DateTimeOffset? Deadline)
+    DateTimeOffset? Deadline,
+    int RunningServices = 0)
 {
     public bool IsOn(Pane pane) => Cells.TryGetValue(pane, out var cell) && cell.On;
 }
@@ -271,12 +272,25 @@ public sealed class Model
         var packaged = f.Package is not null;
         var cells = new Dictionary<Pane, Cell>();
 
-        // Running: the app's own processes, and what they started.
-        var running = f.Procs.Count > 0;
-        string help = running
-            ? $"{name} is running ({f.Procs.Count} process{(f.Procs.Count == 1 ? "" : "es")}). Switch off to stop it and everything it started."
-            : packaged ? $"{name} isn't running. Switch on to open it." : $"{name} isn't running.";
-        cells[Pane.Running] = new Cell(running, false, running || packaged, false, false, help);
+        // Running: anything of the app's running right now, its service included.
+        var runningServices = f.Services.Where(s => s.Running).ToList();
+        var running = f.Procs.Count > 0 || runningServices.Count > 0;
+        string help;
+        if (running)
+        {
+            var parts = new List<string>();
+            if (f.Procs.Count > 0) parts.Add($"{f.Procs.Count} process{(f.Procs.Count == 1 ? "" : "es")}");
+            if (runningServices.Count > 0) parts.Add($"the {List(runningServices.Select(s => s.Name))} service");
+            help = $"{name} is running ({string.Join(" and ", parts)}). Switch off to stop it, everything it started, and its service.";
+            if (runningServices.Count > 0)
+                help += " The service can start again with Windows or when the app asks; switch Service off to keep it stopped.";
+        }
+        else
+        {
+            help = packaged ? $"{name} isn't running. Switch on to open it." : $"{name} isn't running.";
+        }
+        // Packaged services let any user stop them; others need admin.
+        cells[Pane.Running] = new Cell(running, false, running || packaged, runningServices.Any(s => !s.Packaged), false, help);
 
         // Startup: opening at sign-in, as Task Manager's Startup apps list shows it.
         var enabledItems = f.Startup.Where(e => e.Enabled).ToList();
@@ -287,13 +301,11 @@ public sealed class Model
         cells[Pane.Startup] = new Cell(opensAtSignIn, false, f.Startup.Count > 0,
             enabledItems.Any(e => e.Item is StartupItem.Run { Machine: true }), false, help);
 
-        // Service: a Windows service the app installed, which Task Manager's Startup apps
-        // list leaves out. On while it runs, or will start with Windows and run. Off once
-        // switched off: Revoke stops it, and keeps it stopped.
-        var runningServices = f.Services.Where(s => s.Running).ToList();
+        // Service: whether a Windows service the app installed may run. Task Manager's
+        // Startup apps list leaves these out. Off once switched off: Revoke stops it, and
+        // keeps it stopped. (Whether it's running right now shows under Running.)
         var kept = f.Services.Where(s => Settings.KeepStopped.Contains(s.Name)).ToList();
-        var autoServices = f.Services.Where(s => s.StartsWithWindows && !kept.Contains(s)).ToList();
-        var serviceOn = runningServices.Count > 0 || autoServices.Count > 0;
+        var serviceOn = f.Services.Any(s => !kept.Contains(s));
         var serviceNames = List(f.Services.Select(s => s.Name));
         if (f.Services.Count == 0)
         {
@@ -303,7 +315,7 @@ public sealed class Model
         {
             var what = new List<string>();
             if (runningServices.Count > 0) what.Add("is running");
-            if (autoServices.Count > 0) what.Add("starts with Windows");
+            what.Add(f.Services.Any(s => s.StartsWithWindows) ? "starts with Windows" : "starts when the app asks");
             var system = f.Services.Any(s => s.RunsAsSystem) ? ", which runs as SYSTEM," : "";
             help = $"{serviceNames}{system} {string.Join(" and ", what)}. Switch off to stop it and keep it stopped.";
         }
@@ -312,10 +324,6 @@ public sealed class Model
             help = kept.Any(s => s.Packaged && s.StartsWithWindows)
                 ? $"Revoke keeps {serviceNames} stopped. Windows only lets {name}'s installer change how it starts, so it still starts with Windows, and Revoke stops it each time. Features of {name} that need it won't work. Switch on to let it run."
                 : $"Revoke keeps {serviceNames} stopped. Features of {name} that need it won't work. Switch on to let it run.";
-        }
-        else
-        {
-            help = $"{serviceNames} is stopped and doesn't start with Windows. Switch on to start it.";
         }
         var serviceAdmin = f.Services.Any(s => !s.Packaged);
         cells[Pane.Service] = new Cell(serviceOn, false, f.Services.Count > 0, serviceAdmin, false, help,
@@ -368,7 +376,7 @@ public sealed class Model
         var helpers = f.Helpers.Select(h => facts.GetValueOrDefault(h)?.Name ?? FallbackName(h)).Distinct().ToList();
         return new Row(client, name, f.Publisher ?? "", f.Package?.Logo, watched, cells,
             f.Procs.Count + f.Helpers.Sum(h => facts.GetValueOrDefault(h)?.Procs.Count ?? 0),
-            f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.Name).ToList(), helpers, DeadlineOf(f));
+            f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.Name).ToList(), helpers, DeadlineOf(f), f.Services.Count(s => s.Running));
     }
 
     /// <summary>The programs a client's firewall rules should cover: the ones it has run,
@@ -523,6 +531,11 @@ public sealed class Model
                         var (n, errs) = Processes.KillTree(f.Procs, self);
                         killed += n;
                         errors.AddRange(errs.Select(e => $"{name}: {e}"));
+                        // Packaged services, and many others, let any user stop them.
+                        foreach (var service in f.Services.Where(s => s.Running))
+                        {
+                            if (!Services.TrySet(service.Name, running: false)) ops.Add(new ElevatedOp.StopService(service.Name));
+                        }
                         break;
 
                     case Pane.Startup:

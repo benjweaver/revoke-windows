@@ -5,6 +5,16 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.1.1] - 2026-10-07
+
+### Fixed
+
+- Running now shows on while an app's service is running, even with the app
+  closed, and the row says "Service running". Switching Running off stops the
+  service too, without admin for packaged services like Claude's, and so does
+  stopping an app automatically when its last window closes. Service now means
+  whether the service may run at all.
+
 ## [0.1.0] - 2026-10-07
 
 ### Added
@@ -28,4 +38,5 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.1.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.1
 [0.1.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.0

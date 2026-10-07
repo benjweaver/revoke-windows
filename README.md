@@ -70,9 +70,9 @@ One row per watched app, one switch per column. A switch is orange while access 
 
 | Column | On means | Switching off |
 |---|---|---|
-| Running | The app or its helpers are running | Stops the app and its whole process tree |
+| Running | The app, its helpers or its service are running | Stops the app, its whole process tree, and its service (which can start again with Windows or when the app asks) |
 | Startup | It opens when you sign in, as Task Manager's Startup apps list shows | Turns off its startup task or Run entry |
-| Service | A Windows service it installed is running, or starts with Windows. Task Manager's Startup apps list leaves these out | Stops the service and keeps it stopped until you switch it back on. **This can break the app**: features that need the service stop working. Revoke asks first |
+| Service | A Windows service it installed is allowed to run. Task Manager's Startup apps list leaves these out | Stops the service and keeps it stopped until you switch it back on. **This can break the app**: features that need the service stop working. Revoke asks first |
 | Screen | It may capture the screen through Windows' screenshot API | Denies it in Settings › Privacy & security |
 | Camera, Mic, Location | It's allowed to use them | Denies it. A red dot means it's using one right now |
 | Network | Devices on your network can connect to it, or it can reach them | Switches off its inbound firewall rules and blocks it from your local network (asks for admin) |

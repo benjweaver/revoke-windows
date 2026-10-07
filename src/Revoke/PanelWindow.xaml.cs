@@ -376,8 +376,8 @@ public sealed partial class PanelWindow : Window
                 parts.Add(row.HasWindow ? "Open" : row.Client.Kind == ClientKind.Package ? "Running in the background" : "Running");
             }
             if (row.Helpers.Count > 0) parts.Add(row.Helpers.Count == 1 ? row.Helpers[0] : $"{row.Helpers.Count} helpers");
+            if (row.RunningServices > 0) parts.Add(parts.Count == 0 ? "Service running" : "service");
             if (row.Cells[Pane.Service].Caution) parts.Add("service kept off");
-            else if (row.IsOn(Pane.Service)) parts.Add("service");
             return parts.Count > 0 ? string.Join(" + ", parts) : "Running";
         }
     }
