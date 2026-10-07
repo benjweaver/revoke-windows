@@ -12,6 +12,13 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = Split-Path -Parent $PSScriptRoot
+
+# Runs a program that reports on stderr, which Windows PowerShell 5.1 would otherwise
+# turn into a fatal error. Check $LASTEXITCODE afterwards.
+function Invoke-Quietly([scriptblock]$command) {
+    $ErrorActionPreference = 'Continue'
+    & $command 2>&1 | Out-String
+}
 $flavour = 'windows-x64'
 
 $version = ([xml](Get-Content (Join-Path $repo 'Directory.Build.props'))).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
@@ -24,7 +31,7 @@ try {
     if (git status --porcelain) { throw 'There are uncommitted changes. Commit and push them first.' }
     git fetch --quiet origin
     if ((git rev-parse HEAD) -ne (git rev-parse '@{u}')) { throw 'This branch and GitHub differ. Push (or pull) first.' }
-    gh release view $tag 2>$null | Out-Null
+    Invoke-Quietly { gh release view $tag } | Out-Null
     if ($LASTEXITCODE -eq 0) { throw "$tag is already released. Bump <Version> in Directory.Build.props first." }
 }
 finally {
@@ -68,8 +75,10 @@ Write-Host ("{0} is {1:N0} MB" -f $zipName, ((Get-Item $zip).Length / 1MB))
 
 Push-Location $repo
 try {
-    gh release create $tag $zip $sums --title "Revoke $version" --notes-file $notesFile --target (git rev-parse HEAD)
-    if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }
+    $target = git rev-parse HEAD
+    $output = Invoke-Quietly { gh release create $tag $zip $sums --title "Revoke $version" --notes-file $notesFile --target $target }
+    if ($LASTEXITCODE -ne 0) { throw "gh release create failed: $output" }
+    Write-Host $output.Trim()
 }
 finally {
     Pop-Location
