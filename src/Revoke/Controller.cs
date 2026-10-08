@@ -16,11 +16,12 @@ sealed record View(
     bool LaunchAtLogin,
     bool HelperInstalled,
     bool HelperCurrent,
+    bool HelperRunning,
     bool AskBeforeStoppingServices,
     bool ServicesStartOnDemand,
     IReadOnlyList<KnownApp> Known)
 {
-    public static readonly View Empty = new(Snapshot.Empty, null, false, false, false, 30, false, false, false, true, true, false, []);
+    public static readonly View Empty = new(Snapshot.Empty, null, false, true, false, 30, false, false, false, true, false, true, false, []);
 }
 
 /// <summary>
@@ -188,6 +189,7 @@ sealed class Controller
         LaunchAtLogin(),
         Helper.IsInstalled,
         Helper.IsCurrent,
+        Helper.IsRunning,
         m.Settings.AskBeforeStoppingServices,
         m.Settings.ServicesStartOnDemand,
         m.KnownApps());

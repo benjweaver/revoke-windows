@@ -49,8 +49,15 @@
       </Button>
     </Grid>
 
-    <InfoBar x:Name="FirewallNotice" Grid.Row="1" Severity="Warning" IsClosable="False"
-             Message="Revoke can't read the firewall rules, so the Local network column may be wrong." />
+    <StackPanel Grid.Row="1" Spacing="8">
+      <InfoBar x:Name="HelperNotice" Severity="Error" IsClosable="False">
+        <InfoBar.ActionButton>
+          <Button x:Name="HelperNoticeButton" Click="HelperNotice_Click" />
+        </InfoBar.ActionButton>
+      </InfoBar>
+      <InfoBar x:Name="FirewallNotice" Severity="Warning" IsClosable="False"
+               Message="Revoke can't read the firewall rules, so the Local network column may be wrong." />
+    </StackPanel>
 
     <Grid x:Name="Columns" Grid.Row="2" Padding="8,0" />
 

@@ -780,22 +780,30 @@ public sealed class Model
     }
 
     /// <summary>
-    /// While services are meant to start on demand, an app update can set its service back to
-    /// starting with Windows. This sets it to Manual again, through the helper only: never
-    /// with a UAC prompt, which mustn't appear out of nowhere.
+    /// While services are meant to start on demand, this sets any that start with Windows to
+    /// Manual: ones the option hasn't reached yet, like on a new install once the helper is
+    /// there, and ones an app update set back. Through the helper only: never with a UAC
+    /// prompt, which mustn't appear out of nowhere.
     /// </summary>
     Activity? KeepServicesOnDemand()
     {
         if (!Settings.ServicesStartOnDemand) return null;
         var reset = WatchedServices().Where(s => s.StartsWithWindows && !Settings.KeepStopped.Contains(s.Name)).ToList();
-        if (reset.Count == 0) return null;
+        // Asking a helper that isn't running would wait for its pipe on every tick.
+        if (reset.Count == 0 || !Helper.IsRunning) return null;
         var ops = reset.Select(s => (ElevatedOp)new ElevatedOp.SetServiceStart(s.Name, 3)).ToList();
         if (Helper.Send(ops) is not { Error: null } reply) return null;
         var changed = reset.Where((_, i) => !reply.Rejected.Contains(i)).ToList();
         if (changed.Count == 0) return null;
+        var again = changed.Where(s => Settings.ServiceStarts.ContainsKey(s.Name)).ToList();
+        var first = changed.Except(again).ToList();
+        foreach (var service in first) Settings.ServiceStarts[service.Name] = service.Start;
+        if (first.Count > 0) Settings.Save();
         // Reread at the next minute's refresh; the registry already says Manual.
         packagesRead = DateTime.MinValue;
-        return LastActivity = Activity.Now($"Set {List(changed.Select(s => s.Name))} to start only when an app starts it again, after an update changed it");
+        return LastActivity = Activity.Now(first.Count > 0
+            ? $"Set {List(first.Select(s => s.Name))} to start only when an app starts it, from the next restart"
+            : $"Set {List(again.Select(s => s.Name))} to start only when an app starts it again, after an update changed it");
     }
 
     List<Service> WatchedServices() =>

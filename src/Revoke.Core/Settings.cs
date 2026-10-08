@@ -11,7 +11,7 @@ public sealed class Settings
 
     /// <summary>Stop a watched app, and revoke its access, once its last window closes,
     /// rather than leaving it in the notification area.</summary>
-    public bool RevokeOnClose { get; set; }
+    public bool RevokeOnClose { get; set; } = true;
     public bool RevokeAfterLimit { get; set; }
     public int LimitMinutes { get; set; } = 30;
     public bool RevokeOnLock { get; set; }
@@ -32,7 +32,7 @@ public sealed class Settings
     /// <summary>Confirm before stopping an app's service, which can break the app.</summary>
     public bool AskBeforeStoppingServices { get; set; } = true;
     /// <summary>Watched apps' services start only when the apps start them, not with Windows.</summary>
-    public bool ServicesStartOnDemand { get; set; }
+    public bool ServicesStartOnDemand { get; set; } = true;
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 

@@ -5,6 +5,25 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.1.4] - 2026-10-08
+
+### Added
+
+- The panel shows a banner when the admin helper isn't running, with a Start button,
+  and when it's out of date, or not installed while an option needs it. Settings marks
+  a stopped helper in red.
+
+### Changed
+
+- New installs stop watched apps when their last window closes, and set their services
+  to start only when the apps start them (once the admin helper is installed), by
+  default. Existing settings are kept.
+
+### Fixed
+
+- With services set to start on demand and the helper stopped, every refresh waited
+  1.5 seconds for the helper.
+
 ## [0.1.3] - 2026-10-08
 
 ### Added
@@ -66,6 +85,7 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.1.4]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.4
 [0.1.3]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.3
 [0.1.2]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.2
 [0.1.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.1

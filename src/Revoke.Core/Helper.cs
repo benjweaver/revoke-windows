@@ -58,6 +58,23 @@ public static unsafe partial class Helper
         }
     }
 
+    /// <summary>Whether the helper's service is running, which any user may ask.</summary>
+    public static bool IsRunning
+    {
+        get
+        {
+            try
+            {
+                using var service = new ServiceController(ServiceName);
+                return service.Status == ServiceControllerStatus.Running;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+    }
+
     /// <summary>Whether the installed helper is the one beside Revoke.exe. Installing copies
     /// it, keeping its size and modified time.</summary>
     public static bool IsCurrent

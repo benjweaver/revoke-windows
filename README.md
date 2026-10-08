@@ -89,8 +89,9 @@ boot or when the app starts it, until you switch it back on. Revoke confirms bef
 stopping a service, and marks one it keeps stopped.
 
 Claude's and ChatGPT's services start with Windows. To keep the apps working but stop
-that, switch on **Apps' services start only when the apps start them** in Settings.
-Windows' service API lets only the package installer change a packaged app's service,
+that, Revoke sets them to start only when the apps start them, once the admin helper is
+installed (switch **Apps' services start only when the apps start them** off in Settings
+to leave them be). Windows' service API lets only the package installer change a packaged app's service,
 so Revoke sets it to Manual in the service's registry key, through the admin helper,
 from the next restart, and sets it again if an app update puts it back. Claude's service
 has a start trigger, so Windows starts it when Claude connects to it; Codex starts its
@@ -168,7 +169,8 @@ itself and only makes ones that tighten things or undo its own:
 
 Anything else, like the service of an app you added to the watch list yourself, still
 gets a UAC prompt. The helper logs every request to the Application event log under
-`RevokeHelper`. Remove it from Settings, also behind one UAC prompt.
+`RevokeHelper`. Remove it from Settings, also behind one UAC prompt. If it stops
+running, or is out of date, the panel says so, with a button to start or update it.
 
 Without the helper, Revoke runs the helper program once as admin for each set of
 changes, behind one UAC prompt. The changes go on its command line rather than into a

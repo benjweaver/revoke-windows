@@ -132,12 +132,40 @@ public sealed partial class PanelWindow : Window
         AppWindow.MoveAndResize(new RectInt32(x - frameW / 2, Math.Max(area.Y, y) - frameH / 2, w + frameW, h + frameH));
     }
 
+    /// <summary>What's wrong with the admin helper, when something is: stopped, out of date,
+    /// or missing while an option needs it.</summary>
+    static (InfoBarSeverity Severity, string Title, string Message, string Action)? HelperProblem(View view) =>
+        (view.HelperInstalled, view.HelperRunning, view.HelperCurrent) switch
+        {
+            (true, false, _) => (InfoBarSeverity.Error, "The admin helper isn't running",
+                "Service and firewall changes ask for admin until it's started"
+                    + (view.ServicesStartOnDemand ? ", and an app update can set its service back to starting with Windows." : "."),
+                "Start"),
+            (true, true, false) => (InfoBarSeverity.Warning, "The admin helper is out of date",
+                "A newer one came with this version of Revoke. Changes the old one doesn't know ask for admin.", "Update"),
+            (false, _, _) when view.ServicesStartOnDemand => (InfoBarSeverity.Warning, "The admin helper isn't installed",
+                "Apps' services keep starting with Windows until it is, and service and firewall changes ask for admin.", "Install"),
+            _ => null,
+        };
+
+    async void HelperNotice_Click(object sender, RoutedEventArgs e) => await controller.SetHelperAsync(install: true);
+
     void Render(View view)
     {
         updating = true;
         var snapshot = view.Snapshot;
         Status.Text = snapshot.Status;
         FirewallNotice.IsOpen = !snapshot.CanReadFirewall;
+        var helper = HelperProblem(view);
+        HelperNotice.IsOpen = helper is not null;
+        if (helper is var (severity, title, message, action))
+        {
+            HelperNotice.Severity = severity;
+            HelperNotice.Title = title;
+            HelperNotice.Message = message;
+            HelperNoticeButton.Content = action;
+            HelperNoticeButton.IsEnabled = !view.Busy;
+        }
         RevokeAll.IsEnabled = !view.Busy;
         Spinner.IsActive = view.Busy;
         Activity.Text = view.Activity is { Text.Length: > 0 } a ? $"{a.At:t} · {a.Text}" : "";
