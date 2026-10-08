@@ -85,7 +85,7 @@ param([switch]$Uninstall, [switch]$Update)
         $current = ((Get-Item $exe).VersionInfo.ProductVersion -split '\+')[0]
         if ($current -eq $version) {
             Write-Host "Revoke $current is already the latest release."
-            if (-not (Get-Process Revoke -ErrorAction SilentlyContinue)) { Start-Process $exe -ArgumentList '--background' }
+            if (-not (Get-Process Revoke -ErrorAction SilentlyContinue)) { Start-Process explorer.exe -ArgumentList "`"$exe`"" }
             return
         }
         Write-Host "Updating Revoke $current to $version"
@@ -144,8 +144,9 @@ param([switch]$Uninstall, [switch]$Update)
         Set-ItemProperty $run -Name Revoke -Value "`"$exe`" --background"
     }
 
-    # The first time, Revoke opens its settings by itself.
-    Start-Process $exe
+    # Through Explorer, so Revoke starts as if you'd opened it, even when this runs in a
+    # terminal inside another app's container. The first time, its settings open.
+    Start-Process explorer.exe -ArgumentList "`"$exe`""
     Write-Host 'Revoke is running. Find it in the notification area, or Start > Revoke.'
 
     $installed = Join-Path $env:ProgramFiles 'Revoke\Helper\RevokeHelper.exe'

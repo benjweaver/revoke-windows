@@ -27,6 +27,15 @@ public partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Started from inside another app's container (a terminal in Claude Code or Codex,
+        // say), nothing Revoke changed would really change. Start again outside it.
+        if (Revoke.Core.Container.IsCaptured())
+        {
+            Revoke.Core.Container.RelaunchOutside(Environment.ProcessPath!);
+            Exit();
+            return;
+        }
+
         // One Revoke at a time: opening it again brings up its settings.
         instance = new Mutex(true, InstanceName, out var first);
         if (!first)

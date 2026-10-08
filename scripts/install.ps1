@@ -58,7 +58,9 @@ if ((Get-ItemProperty $run -ErrorAction SilentlyContinue).Revoke) {
     Set-ItemProperty $run -Name Revoke -Value "`"$exe`" --background"
 }
 
-Start-Process $exe -ArgumentList '--background'
+# Through Explorer, so Revoke starts as if you'd opened it, even from a terminal inside
+# another app's container (Claude Code's or Codex's, say).
+Start-Process explorer.exe -ArgumentList "`"$exe`""
 $version = (Get-Item $exe).VersionInfo.ProductVersion
 Write-Host "Revoke $version is installed and running. Find it in the notification area, or Start > Revoke."
 

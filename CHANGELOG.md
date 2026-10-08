@@ -5,6 +5,16 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.1.2] - 2026-10-07
+
+### Fixed
+
+- Revoke started from a terminal inside another app, like Claude Code's or Codex's,
+  inherited that app's container, so Windows kept its settings, its "Open at sign-in"
+  entry, and its privacy and startup changes in that app's private storage, where they
+  did nothing. Revoke now notices when it starts and relaunches itself outside, and the
+  install scripts start it through Explorer.
+
 ## [0.1.1] - 2026-10-07
 
 ### Fixed
@@ -38,5 +48,6 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.1.2]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.2
 [0.1.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.1
 [0.1.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.0
