@@ -547,6 +547,7 @@ public sealed class Model
         var serviceStarts = new List<(string, int)>();
         var keepStopped = new List<string>();
         var killed = 0;
+        var killedFor = new HashSet<Client>();
 
         foreach (var client in clients)
         {
@@ -559,6 +560,7 @@ public sealed class Model
                     case Pane.Running:
                         var (n, errs) = Processes.KillTree(f.Procs, self);
                         killed += n;
+                        if (n > 0) killedFor.Add(client);
                         errors.AddRange(errs.Select(e => $"{name}: {e}"));
                         // Packaged services, and many others, let any user stop them.
                         foreach (var service in f.Services.Where(s => s.Running))
@@ -650,35 +652,51 @@ public sealed class Model
         }
 
         Refresh(force: true);
-        var revoked = clients
+        // Say only what this changed: an app that quit by itself meanwhile wasn't stopped by
+        // Revoke, and switches that were already off weren't revoked.
+        var changed = clients
             .Where(before.ContainsKey)
-            .Where(c =>
+            .Select(c =>
             {
                 var old = before[c];
                 var now = RowFor(c);
-                return panes.Any(p => old.IsOn(p) && now?.IsOn(p) != true) || (panes.Contains(Pane.Running) && old.Processes > 0);
+                var off = panes.Where(p => old.IsOn(p) && now?.IsOn(p) != true).ToHashSet();
+                if (killedFor.Contains(c)) off.Add(Pane.Running);
+                return (old.Name, Off: off);
             })
-            .Select(c => before[c].Name)
+            .Where(c => c.Off.Count > 0)
             .ToList();
-        var what = panes.Count == 1 ? Title(panes[0]).ToLowerInvariant() : "access";
+        var stopped = changed.Where(c => c.Off.Contains(Pane.Running)).Select(c => c.Name).ToList();
+        var revokedFor = changed.Where(c => c.Off.Any(p => p != Pane.Running)).Select(c => c.Name).ToList();
+        var revokedPanes = panes.Where(p => p != Pane.Running && changed.Any(c => c.Off.Contains(p)));
+        var revokedWhat = List(revokedPanes.Select(p => Title(p).ToLowerInvariant()));
         string text;
         if (errors.Count > 0)
         {
+            var what = panes.Count == 1 ? Title(panes[0]).ToLowerInvariant() : "access";
             text = $"Couldn't revoke {what}: {errors[0]}";
         }
-        else if (revoked.Count == 0)
+        else if (changed.Count == 0)
         {
             // Automatic runs often find nothing to do; only answer a click.
             if (reason is not null) return LastActivity ?? Activity.Now("");
             text = "Nothing to revoke";
         }
-        else if (panes is [Pane.Running])
+        else if (revokedFor.Count == 0)
         {
-            text = $"Stopped {List(revoked)}{(killed > 0 ? $" ({killed} processes)" : "")}";
+            text = $"Stopped {List(stopped)}{(panes is [Pane.Running] && killed > 0 ? $" ({killed} processes)" : "")}";
+        }
+        else if (stopped.Count == 0)
+        {
+            text = $"Revoked {revokedWhat} for {List(revokedFor)}";
+        }
+        else if (stopped.SequenceEqual(revokedFor))
+        {
+            text = $"Stopped {List(stopped)} and revoked {(stopped.Count == 1 ? "its" : "their")} {revokedWhat}";
         }
         else
         {
-            text = $"Revoked {what} for {List(revoked)}";
+            text = $"Stopped {List(stopped)}, and revoked {revokedWhat} for {List(revokedFor)}";
         }
         if (reason is not null) text += $" when {reason}";
         if (skippedAdmin) text += ". Services and firewall rules need you to click Revoke All";

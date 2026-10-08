@@ -5,6 +5,14 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.1.6] - 2026-10-08
+
+### Fixed
+
+- The note after Revoke acts on its own now says what it did, like "Stopped Claude
+  when its last window closed", instead of "Revoked access" for everything. An app
+  that quit by itself is no longer reported as stopped.
+
 ## [0.1.5] - 2026-10-08
 
 ### Added
@@ -94,6 +102,7 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.1.6]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.6
 [0.1.5]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.5
 [0.1.4]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.4
 [0.1.3]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.3
