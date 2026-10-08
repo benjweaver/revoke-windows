@@ -32,6 +32,9 @@ public sealed partial class PanelWindow : Window
     ];
 
     readonly Controller controller;
+    /// <summary>The note under the list, and whether an explanation is showing in its place.</summary>
+    string note = "";
+    bool explaining;
     readonly Dictionary<Client, RowView> rows = [];
     readonly Dictionary<string, BitmapImage> images = [];
     List<string> order = [];
@@ -144,8 +147,9 @@ public sealed partial class PanelWindow : Window
         Activity.Foreground = (Brush)Application.Current.Resources[view.Activity?.IsError == true
             ? "SystemFillColorCriticalBrush" : "TextFillColorSecondaryBrush"];
         ToolTipService.SetToolTip(Activity, string.IsNullOrEmpty(Activity.Text) ? null : Activity.Text);
-        Footnote.Text = "Switching camera, microphone, location or screen capture on opens Settings, because only you can grant access there."
+        note = "Switching camera, microphone, location or screen capture on opens Settings, because only you can grant access there."
             + (view.HelperInstalled ? "" : " Services and firewall rules ask for admin, unless you install the helper in Settings.");
+        if (!explaining) Footnote.Text = note;
 
         // Sections and rows, rebuilt only when the set or order changes, so a switch with
         // keyboard focus keeps it across the updates every couple of seconds.
@@ -205,7 +209,8 @@ public sealed partial class PanelWindow : Window
             var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Spacing = 2 };
             stack.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
             stack.Children.Add(new TextBlock { Text = label, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center });
-            ToolTipService.SetToolTip(stack, tip);
+            stack.PointerEntered += (_, _) => Explain(tip);
+            stack.PointerExited += (_, _) => StopExplaining();
             Grid.SetColumn(stack, i + 1);
             stack.Opacity = 0.7;
             Columns.Children.Add(stack);
@@ -241,6 +246,26 @@ public sealed partial class PanelWindow : Window
             return;
         }
         await controller.ActAsync(m => m.Set(client, pane, on));
+    }
+
+    /// <summary>
+    /// Shows a switch's explanation where the note under the list usually is. Tooltips
+    /// close after a few seconds, too soon to read these; this stays until the pointer or
+    /// keyboard focus moves on.
+    /// </summary>
+    void Explain(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        explaining = true;
+        Footnote.Text = text;
+        Footnote.Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+    }
+
+    void StopExplaining()
+    {
+        explaining = false;
+        Footnote.Text = note;
+        Footnote.Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
     }
 
     async void RevokeAll_Click(object sender, RoutedEventArgs e)
@@ -346,8 +371,13 @@ public sealed partial class PanelWindow : Window
             for (var i = 0; i < Panes.Length; i++)
             {
                 var pane = Panes[i].Pane;
-                var cell = new CellView(Panes[i].Tip);
+                // Named for its column ("Running for Claude"); the explanation is the help text.
+                var cell = new CellView(Model.Title(pane));
                 cell.Switch.Toggled += (_, _) => panel.Switch_Toggled(client, pane, cell.Switch);
+                cell.Root.PointerEntered += (_, _) => panel.Explain(cell.Help);
+                cell.Root.PointerExited += (_, _) => panel.StopExplaining();
+                cell.Switch.GotFocus += (_, _) => panel.Explain(cell.Help);
+                cell.Switch.LostFocus += (_, _) => panel.StopExplaining();
                 Grid.SetColumn(cell.Root, i + 1);
                 Root.Children.Add(cell.Root);
                 cells[pane] = cell;
@@ -414,6 +444,9 @@ public sealed partial class PanelWindow : Window
         };
         readonly string column;
 
+        /// <summary>What this switch does, shown under the list while it's pointed at or focused.</summary>
+        public string Help { get; private set; } = "";
+
         public CellView(string column)
         {
             this.column = column;
@@ -433,7 +466,7 @@ public sealed partial class PanelWindow : Window
             if (Switch.IsOn != cell.On) Switch.IsOn = cell.On;
             Switch.IsEnabled = !busy;
             var help = cell.NeedsAdmin && cell.Enabled && askForAdmin ? cell.Help + " (asks for admin)" : cell.Help;
-            ToolTipService.SetToolTip(Root, help);
+            Help = help;
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(Switch, $"{column} for {appName}");
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(Switch, help);
         }

@@ -65,8 +65,10 @@
                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
     </StackPanel>
 
+    <!-- Room for three lines, so the panel doesn't change size as the explanation of
+         the switch under the pointer replaces the usual note. -->
     <TextBlock Grid.Row="5" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
-               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+               Foreground="{ThemeResource TextFillColorTertiaryBrush}" MinHeight="48" MaxLines="4"
                x:Name="Footnote" />
   </Grid>
 </Window>
