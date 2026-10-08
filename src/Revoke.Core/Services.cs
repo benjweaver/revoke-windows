@@ -8,8 +8,10 @@ namespace Revoke.Core;
 /// <param name="Packaged">Installed by an MSIX package. Only Windows' package installer
 /// (AppXSvc) can change how these start, not even admins or SYSTEM, though any user may
 /// stop or start them.</param>
+/// <param name="HasStartTrigger">Windows starts it on demand too: when an app connects to it,
+/// say, as Claude does to CoworkVMService's pipe, even if it was stopped.</param>
 public sealed record Service(string Name, string DisplayName, Client Client, string Program, int Start, bool Running,
-    string Account = "", bool Packaged = false)
+    string Account = "", bool Packaged = false, bool HasStartTrigger = false)
 {
     public bool StartsWithWindows => Start == 2;
 
@@ -59,9 +61,24 @@ public static class Services
                 key.GetValue("Start") is int start ? start : 3,
                 false,
                 key.GetValue("ObjectName") as string ?? "LocalSystem",
-                (type & 0x200) != 0)); // SERVICE_PKG_SERVICE
+                (type & 0x200) != 0, // SERVICE_PKG_SERVICE
+                HasStartTrigger(key)));
         }
         return services;
+    }
+
+    /// <summary>Whether Windows starts the service on demand. The service manager keeps each
+    /// trigger in a numbered key under TriggerInfo, whose Action is 1 for start, 2 for stop.</summary>
+    static bool HasStartTrigger(RegistryKey service)
+    {
+        using var triggers = service.OpenSubKey("TriggerInfo");
+        if (triggers is null) return false;
+        foreach (var name in triggers.GetSubKeyNames())
+        {
+            using var trigger = triggers.OpenSubKey(name);
+            if (trigger?.GetValue("Action") is int action && action == 1) return true;
+        }
+        return false;
     }
 
     /// <summary>Stops or starts a service as the current user, which many services allow

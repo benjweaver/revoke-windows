@@ -17,9 +17,10 @@ sealed record View(
     bool HelperInstalled,
     bool HelperCurrent,
     bool AskBeforeStoppingServices,
+    bool ServicesStartOnDemand,
     IReadOnlyList<KnownApp> Known)
 {
-    public static readonly View Empty = new(Snapshot.Empty, null, false, false, false, 30, false, false, false, true, true, []);
+    public static readonly View Empty = new(Snapshot.Empty, null, false, false, false, 30, false, false, false, true, true, false, []);
 }
 
 /// <summary>
@@ -188,6 +189,7 @@ sealed class Controller
         Helper.IsInstalled,
         Helper.IsCurrent,
         m.Settings.AskBeforeStoppingServices,
+        m.Settings.ServicesStartOnDemand,
         m.KnownApps());
 
     void Publish(View view)

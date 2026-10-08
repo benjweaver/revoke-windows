@@ -318,18 +318,18 @@ public sealed class Model
         {
             var what = new List<string>();
             if (runningServices.Count > 0) what.Add("is running");
-            // A packaged app's service starts when its app does, so with Windows only if the
-            // app opens at sign-in; another service set to Automatic starts with Windows.
-            what.Add(f.Services.Any(s => s.StartsWithWindows && !s.Packaged) ? "starts with Windows"
-                : f.Services.Any(s => s.Packaged) ? $"starts when {name} does, so with Windows only if {name} is a startup app"
-                : "starts when the app asks");
+            what.Add(f.Services.Any(s => s.StartsWithWindows) ? "starts with Windows" : "starts only when an app starts it");
             var system = f.Services.Any(s => s.RunsAsSystem) ? ", which runs as SYSTEM," : "";
-            help = $"{serviceNames}{system} {string.Join(" and ", what)}. Switch off to stop it and keep it stopped.";
+            help = $"{serviceNames}{system} {string.Join(" and ", what)}.{StartsOnDemand(f.Services)} Switch off to stop it and keep it stopped.";
         }
         else if (kept.Count > 0)
         {
-            help = kept.Any(s => s.Packaged && s.StartsWithWindows)
-                ? $"Revoke keeps {serviceNames} stopped. Windows only lets {name}'s installer change how it starts, so it can still start when {name} does (with Windows only if {name} is a startup app), and Revoke stops it each time. Features of {name} that need it won't work. Switch on to let it run."
+            // How it would come back, from how Windows has it set up.
+            var comesBack = kept.Any(s => s.StartsWithWindows)
+                ? kept.Any(s => s.HasStartTrigger) ? "it still starts with Windows, and whenever an app asks for it," : "it still starts with Windows,"
+                : kept.Any(s => s.HasStartTrigger) ? "Windows still starts it whenever an app asks for it," : null;
+            help = kept.Any(s => s.Packaged) && comesBack is not null
+                ? $"Revoke keeps {serviceNames} stopped. Windows only lets {name}'s installer change how it starts, so {comesBack} and Revoke stops it each time. Features of {name} that need it won't work. Switch on to let it run."
                 : $"Revoke keeps {serviceNames} stopped. Features of {name} that need it won't work. Switch on to let it run.";
         }
         var serviceAdmin = f.Services.Any(s => !s.Packaged);
@@ -484,9 +484,10 @@ public sealed class Model
                 foreach (var service in f.Services) Settings.KeepStopped.Remove(service.Name);
                 Settings.Save();
                 // Back to how each started before Revoke changed it, where Revoke can change
-                // that at all (not packaged services).
+                // that at all (not packaged services), unless they're meant to start on demand.
                 var starts = f.Services
-                    .Where(s => !s.Packaged && Settings.ServiceStarts.TryGetValue(s.Name, out var start) && start != s.Start)
+                    .Where(s => !s.Packaged && !Settings.ServicesStartOnDemand
+                        && Settings.ServiceStarts.TryGetValue(s.Name, out var start) && start != s.Start)
                     .Select(s => (ElevatedOp)new ElevatedOp.SetServiceStart(s.Name, Settings.ServiceStarts[s.Name]))
                     .ToList();
                 if (Elevated.Run(starts) is { } failure) throw new InvalidOperationException(failure);
@@ -712,7 +713,7 @@ public sealed class Model
             if (row.Deadline is { } deadline && deadline <= now) due.Add((row.Client, "its time limit ran out"));
         }
 
-        Activity? activity = KeepServicesStopped();
+        Activity? activity = KeepServicesStopped() ?? KeepServicesOnDemand();
         if (orphans.Count > 0)
         {
             var (n, _) = Processes.KillTree(orphans, self);
@@ -740,6 +741,69 @@ public sealed class Model
         if (stopped.Count == 0) return null;
         return LastActivity = Activity.Now($"Stopped {List(stopped)}, which Revoke keeps stopped");
     }
+
+    /// <summary>
+    /// Switches the option that watched apps' services start only when the apps start them,
+    /// not with Windows. On, they're set to Manual (from the next restart); off, they go back
+    /// to how they started before.
+    /// </summary>
+    public Activity SetServicesStartOnDemand(bool on)
+    {
+        Settings.ServicesStartOnDemand = on;
+        Settings.Save();
+        Refresh(force: true);
+        var watchedServices = WatchedServices();
+        List<ElevatedOp> ops;
+        if (on)
+        {
+            ops = watchedServices.Where(s => s.StartsWithWindows).Select(s => (ElevatedOp)new ElevatedOp.SetServiceStart(s.Name, 3)).ToList();
+            foreach (var service in watchedServices.Where(s => s.StartsWithWindows)) Settings.ServiceStarts.TryAdd(service.Name, service.Start);
+        }
+        else
+        {
+            ops = watchedServices
+                .Where(s => Settings.ServiceStarts.TryGetValue(s.Name, out var start) && start != s.Start && !Settings.KeepStopped.Contains(s.Name))
+                .Select(s => (ElevatedOp)new ElevatedOp.SetServiceStart(s.Name, Settings.ServiceStarts[s.Name]))
+                .ToList();
+        }
+        var error = Elevated.Run(ops);
+        if (error is null && !on)
+        {
+            foreach (var op in ops.OfType<ElevatedOp.SetServiceStart>()) Settings.ServiceStarts.Remove(op.Name);
+        }
+        Settings.Save();
+        Refresh(force: true);
+        var names = List(ops.OfType<ElevatedOp.SetServiceStart>().Select(o => o.Name));
+        return LastActivity = error is not null ? Activity.Now($"Couldn't change how services start: {error}", true)
+            : ops.Count == 0 ? Activity.Now(on ? "Watched apps' services already start only when asked" : "Watched apps' services start as they did")
+            : Activity.Now(on ? $"{names} will start only when an app starts it, from the next restart" : $"{names} starts with Windows again");
+    }
+
+    /// <summary>
+    /// While services are meant to start on demand, an app update can set its service back to
+    /// starting with Windows. This sets it to Manual again, through the helper only: never
+    /// with a UAC prompt, which mustn't appear out of nowhere.
+    /// </summary>
+    Activity? KeepServicesOnDemand()
+    {
+        if (!Settings.ServicesStartOnDemand) return null;
+        var reset = WatchedServices().Where(s => s.StartsWithWindows && !Settings.KeepStopped.Contains(s.Name)).ToList();
+        if (reset.Count == 0) return null;
+        var ops = reset.Select(s => (ElevatedOp)new ElevatedOp.SetServiceStart(s.Name, 3)).ToList();
+        if (Helper.Send(ops) is not { Error: null } reply) return null;
+        var changed = reset.Where((_, i) => !reply.Rejected.Contains(i)).ToList();
+        if (changed.Count == 0) return null;
+        // Reread at the next minute's refresh; the registry already says Manual.
+        packagesRead = DateTime.MinValue;
+        return LastActivity = Activity.Now($"Set {List(changed.Select(s => s.Name))} to start only when an app starts it again, after an update changed it");
+    }
+
+    List<Service> WatchedServices() =>
+        Snapshot.Watched.SelectMany(r => facts.GetValueOrDefault(r.Client)?.Services ?? [])
+            .Concat(Snapshot.Watched.SelectMany(r => facts.GetValueOrDefault(r.Client)?.Helpers ?? [])
+                .SelectMany(h => facts.GetValueOrDefault(h)?.Services ?? []))
+            .DistinctBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     /// <summary>The session locked or the PC is going to sleep.</summary>
     public Activity? Locked(string reason) =>
@@ -793,6 +857,11 @@ public sealed class Model
         catch (FileNotFoundException) { }
         return descriptions[path] = string.IsNullOrEmpty(description) ? null : description;
     }
+
+    /// <summary>A sentence for services Windows starts on demand (a start trigger, like
+    /// Claude's CoworkVMService starting when something connects to its pipe), or "".</summary>
+    static string StartsOnDemand(IEnumerable<Service> services) =>
+        services.Any(s => s.HasStartTrigger) ? " Windows also starts it whenever an app asks for it." : "";
 
     /// <summary>"A", "A and B", "A, B and C".</summary>
     public static string List(IEnumerable<string> items)

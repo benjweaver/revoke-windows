@@ -42,6 +42,7 @@ public sealed partial class SettingsWindow : Window
         RevokeOnLock.IsOn = view.RevokeOnLock;
         LaunchAtLogin.IsOn = view.LaunchAtLogin;
         AskBeforeStoppingServices.IsOn = view.AskBeforeStoppingServices;
+        ServicesStartOnDemand.IsOn = view.ServicesStartOnDemand;
         Limit.SelectedIndex = Array.IndexOf(Settings.TimeLimits, view.LimitMinutes);
         Limit.IsEnabled = view.RevokeAfterLimit;
         HelperStatus.Text = (view.HelperInstalled, view.HelperCurrent) switch
@@ -131,6 +132,11 @@ public sealed partial class SettingsWindow : Window
         if (toggle == LaunchAtLogin)
         {
             controller.SetLaunchAtLogin(on);
+            return;
+        }
+        if (toggle == ServicesStartOnDemand)
+        {
+            await controller.ActAsync(m => m.SetServicesStartOnDemand(on));
             return;
         }
         await controller.ChangeSettingsAsync(settings =>

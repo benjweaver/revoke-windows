@@ -135,7 +135,28 @@ public static partial class AdminChanges
         }
     }
 
+    /// <summary>
+    /// Sets how a service starts. A packaged app's service (Claude's, ChatGPT's) refuses the
+    /// service API to everyone but Windows' package installer, so for those the start value
+    /// goes straight into the service's registry key, which administrators may write; the
+    /// service manager reads it at the next restart.
+    /// </summary>
     static void SetStartType(string name, int start)
+    {
+        try
+        {
+            SetStartTypeThroughServiceManager(name, start);
+        }
+        catch (Win32Exception e) when (e.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+        {
+            using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{name}", writable: true)
+                ?? throw new InvalidOperationException($"{name} isn't installed.");
+            if (key.GetValue("Type") is not int type || (type & 0x200) == 0) throw; // only packaged services
+            key.SetValue("Start", start, RegistryValueKind.DWord);
+        }
+    }
+
+    static void SetStartTypeThroughServiceManager(string name, int start)
     {
         var manager = OpenSCManagerW(null, null, 0x1); // SC_MANAGER_CONNECT
         if (manager == 0) throw new Win32Exception();

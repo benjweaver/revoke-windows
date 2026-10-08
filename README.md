@@ -84,11 +84,17 @@ One row per watched app, one switch per column. A switch is orange while access 
 Switching a privacy column back on opens Settings, where only you can grant access.
 
 Apps install services because they need them: Claude's Cowork features run in
-CoworkVMService, for one. Packaged apps' services (Claude's and ChatGPT's are) can't be
-set to start only when asked, not even by an admin; only Windows' package installer can
-change that. So switching one off means Revoke stops it whenever it starts, at boot or
-when the app starts it, until you switch it back on. Revoke confirms before stopping a
-service, and marks one it keeps stopped.
+CoworkVMService, for one. Switching one off means Revoke stops it whenever it starts, at
+boot or when the app starts it, until you switch it back on. Revoke confirms before
+stopping a service, and marks one it keeps stopped.
+
+Claude's and ChatGPT's services start with Windows. To keep the apps working but stop
+that, switch on **Apps' services start only when the apps start them** in Settings.
+Windows' service API lets only the package installer change a packaged app's service,
+so Revoke sets it to Manual in the service's registry key, through the admin helper,
+from the next restart, and sets it again if an app update puts it back. Claude's service
+has a start trigger, so Windows starts it when Claude connects to it; Codex starts its
+own.
 
 **Revoke All Watched** does every column for every watched app, behind one admin
 prompt. Apps signed by Anthropic and OpenAI are watched by default; any other app with

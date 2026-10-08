@@ -5,6 +5,24 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.1.3] - 2026-10-08
+
+### Added
+
+- Settings > General > **Apps' services start only when the apps start them**: sets
+  watched apps' services, like Claude's CoworkVMService, from Automatic to Manual, so
+  they no longer start with Windows but the apps can still start them. For packaged
+  apps' services this is written to the registry by the admin helper, and written again
+  if an app update sets it back. Update the helper after installing.
+
+### Changed
+
+- Tooltips stay open while hovered instead of closing when the panel refreshes.
+- The Service column shows whether the service is running: a green dot while it runs,
+  a grey ring while it's stopped.
+- The Service tooltip says how the service really starts, read from Windows: with
+  Windows, or only when an app starts it, and whether Windows starts it on request.
+
 ## [0.1.2] - 2026-10-07
 
 ### Fixed
@@ -48,6 +66,7 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.1.3]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.3
 [0.1.2]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.2
 [0.1.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.1
 [0.1.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.0

@@ -31,6 +31,8 @@ public sealed class Settings
     public bool SetUp { get; set; }
     /// <summary>Confirm before stopping an app's service, which can break the app.</summary>
     public bool AskBeforeStoppingServices { get; set; } = true;
+    /// <summary>Watched apps' services start only when the apps start them, not with Windows.</summary>
+    public bool ServicesStartOnDemand { get; set; }
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
