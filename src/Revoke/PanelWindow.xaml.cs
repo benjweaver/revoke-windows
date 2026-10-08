@@ -200,7 +200,7 @@ public sealed partial class PanelWindow : Window
                 List.Children.Add(key switch
                 {
                     "#watched" => SectionTitle("Watched"),
-                    "#others" => SectionTitle("Other apps that can capture the screen"),
+                    "#others" => SectionTitle("Other apps that can capture the screen · right-click one to hide it"),
                     "#none" => new TextBlock
                     {
                         Text = "No watched apps are installed or running.",
@@ -369,6 +369,9 @@ public sealed partial class PanelWindow : Window
         readonly TextBlock detail = new() { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
         readonly Dictionary<Pane, CellView> cells = [];
         readonly PanelWindow panel;
+        readonly MenuFlyoutItem watch = new() { Text = "Watch", Icon = new FontIcon { Glyph = "\uE7B3" } };
+        readonly MenuFlyoutItem hide = new() { Text = "Hide from this list", Icon = new FontIcon { Glyph = "\uED1A" } };
+        readonly MenuFlyoutItem unwatch = new() { Text = "Stop watching", Icon = new FontIcon { Glyph = "\uED1A" } };
 
         public RowView(PanelWindow panel, Client client)
         {
@@ -393,6 +396,16 @@ public sealed partial class PanelWindow : Window
             ToolTipService.SetToolTip(app, client.Key);
             Root.Children.Add(app);
 
+            // Right-click: watch an app, stop watching it, or hide one from the other apps.
+            watch.Click += async (_, _) => await panel.controller.SetWatchedAsync(client, true);
+            hide.Click += async (_, _) => await panel.controller.SetHiddenAsync(client, true);
+            unwatch.Click += async (_, _) => await panel.controller.SetWatchedAsync(client, false);
+            var menu = new MenuFlyout();
+            menu.Items.Add(watch);
+            menu.Items.Add(hide);
+            menu.Items.Add(unwatch);
+            Root.ContextFlyout = menu;
+
             for (var i = 0; i < Panes.Length; i++)
             {
                 var pane = Panes[i].Pane;
@@ -408,6 +421,8 @@ public sealed partial class PanelWindow : Window
         public void Update(Row row, bool busy, bool askForAdmin)
         {
             name.Text = row.Name;
+            watch.Visibility = hide.Visibility = row.Watched ? Visibility.Collapsed : Visibility.Visible;
+            unwatch.Visibility = row.Watched ? Visibility.Visible : Visibility.Collapsed;
             letter.Text = row.Name[..1].ToUpperInvariant();
             icon.Source = panel.Image(row.Icon);
             glyph.Visibility = row.Icon is null ? Visibility.Visible : Visibility.Collapsed;

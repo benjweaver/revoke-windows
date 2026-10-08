@@ -255,6 +255,7 @@ public sealed class Model
             var present = f.Package is not null || f.Procs.Count > 0 || f.Startup.Count > 0 || f.Services.Count > 0
                 || f.Inbound.Count > 0 || f.Blocks.Count > 0;
             if (!present || !(isWatched || screenAllowed) || f.HelperOf is not null) continue;
+            if (!isWatched && Settings.Hidden.Contains(client.Key)) continue;
             (isWatched ? watched : others).Add(MakeRow(client, f, isWatched, globallyOn));
         }
         watched.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
@@ -426,6 +427,25 @@ public sealed class Model
         .OrderByDescending(a => a.Watched)
         .ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
         .ToList();
+
+    /// <summary>Apps hidden from the panel's list of other apps.</summary>
+    public List<KnownApp> HiddenApps() => Settings.Hidden
+        .Select(Client.FromKey).OfType<Client>()
+        .Select(client => facts.GetValueOrDefault(client) is { } f
+            ? new KnownApp(client, f.Name ?? FallbackName(client), f.Publisher ?? "", false, f.Package?.Logo)
+            : new KnownApp(client, FallbackName(client), "", false, null))
+        .OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
+        .ToList();
+
+    /// <summary>Hides an app from the panel's list of other apps, or shows it again. Its
+    /// access isn't changed.</summary>
+    public void SetHidden(Client client, bool hidden)
+    {
+        if (hidden) Settings.Hidden.Add(client.Key);
+        else Settings.Hidden.Remove(client.Key);
+        Settings.Save();
+        Refresh();
+    }
 
     public void SetWatched(Client client, bool watched)
     {

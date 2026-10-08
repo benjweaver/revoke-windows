@@ -103,6 +103,10 @@ a window open can be added in Settings. A watched program that only runs because
 another watched app started it (Codex's node and code-mode helpers, Claude Code inside
 Claude) shows in that app's row, and stops with it.
 
+Below the watched apps, the panel lists other apps allowed to capture the screen.
+Right-click one to watch it, or to hide it from that list, like Snipping Tool; hidden
+apps are listed in Settings, where you can show them again.
+
 It can also stop watched apps automatically, if you turn these on in Settings:
 
 - **when an app's last window closes.** Claude and ChatGPT keep running in the

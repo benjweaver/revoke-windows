@@ -19,9 +19,10 @@ sealed record View(
     bool HelperRunning,
     bool AskBeforeStoppingServices,
     bool ServicesStartOnDemand,
-    IReadOnlyList<KnownApp> Known)
+    IReadOnlyList<KnownApp> Known,
+    IReadOnlyList<KnownApp> Hidden)
 {
-    public static readonly View Empty = new(Snapshot.Empty, null, false, true, false, 30, false, false, false, true, false, true, false, []);
+    public static readonly View Empty = new(Snapshot.Empty, null, false, true, false, 30, false, false, false, true, false, true, false, [], []);
 }
 
 /// <summary>
@@ -159,6 +160,12 @@ sealed class Controller
         return null;
     }, wait: true);
 
+    public Task SetHiddenAsync(Client client, bool hidden) => Background(m =>
+    {
+        m.SetHidden(client, hidden);
+        return null;
+    }, wait: true);
+
     /// <summary>Installs, updates or removes the helper, behind one UAC prompt.</summary>
     public Task<Activity?> SetHelperAsync(bool install) => ActAsync(_ =>
     {
@@ -192,7 +199,8 @@ sealed class Controller
         Helper.IsRunning,
         m.Settings.AskBeforeStoppingServices,
         m.Settings.ServicesStartOnDemand,
-        m.KnownApps());
+        m.KnownApps(),
+        m.HiddenApps());
 
     void Publish(View view)
     {

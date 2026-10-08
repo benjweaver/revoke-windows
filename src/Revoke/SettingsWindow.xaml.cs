@@ -13,6 +13,7 @@ public sealed partial class SettingsWindow : Window
     readonly Controller controller;
     readonly Dictionary<Client, (Grid Card, ToggleSwitch Switch)> appCards = [];
     List<Client> appOrder = [];
+    List<Client> hiddenOrder = [];
     bool updating;
 
     internal SettingsWindow(Controller controller)
@@ -79,16 +80,42 @@ public sealed partial class SettingsWindow : Window
                 Apps.Children.Add(new TextBlock { Text = "Open an app to add it here.", Margin = new Thickness(2, 0, 0, 0) });
             }
         }
+        var hidden = view.Hidden.Select(a => a.Client).ToList();
+        if (!hidden.SequenceEqual(hiddenOrder))
+        {
+            hiddenOrder = hidden;
+            Hidden.Children.Clear();
+            foreach (var app in view.Hidden) Hidden.Children.Add(MakeHiddenCard(app));
+            HiddenSection.Visibility = hidden.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
         updating = false;
     }
 
-    (Grid, ToggleSwitch) MakeCard(KnownApp app)
+    Grid MakeHiddenCard(KnownApp app)
     {
         var card = new Grid { Style = FindStyle("Card") };
         card.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         card.ColumnDefinitions.Add(new ColumnDefinition());
         card.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var icon = AppIcon(app);
+        card.Children.Add(icon);
 
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = app.Name });
+        text.Children.Add(new TextBlock { Text = app.Publisher.Length > 0 ? app.Publisher : "Unsigned", Style = FindStyle("Hint") });
+        Grid.SetColumn(text, 1);
+        card.Children.Add(text);
+
+        var show = new Button { Content = "Show", VerticalAlignment = VerticalAlignment.Center };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(show, $"Show {app.Name}");
+        show.Click += async (_, _) => await controller.SetHiddenAsync(app.Client, false);
+        Grid.SetColumn(show, 2);
+        card.Children.Add(show);
+        return card;
+    }
+
+    static FrameworkElement AppIcon(KnownApp app)
+    {
         FrameworkElement icon = app.Icon is { } path
             ? new Image { Source = new BitmapImage(new Uri(path)) { DecodePixelWidth = 48 }, Width = 24, Height = 24 }
             : new Border
@@ -102,7 +129,17 @@ public sealed partial class SettingsWindow : Window
                 },
             };
         icon.VerticalAlignment = VerticalAlignment.Center;
-        card.Children.Add(icon);
+        return icon;
+    }
+
+    (Grid, ToggleSwitch) MakeCard(KnownApp app)
+    {
+        var card = new Grid { Style = FindStyle("Card") };
+        card.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        card.ColumnDefinitions.Add(new ColumnDefinition());
+        card.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        card.Children.Add(AppIcon(app));
 
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock { Text = app.Name });

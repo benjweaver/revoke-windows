@@ -5,6 +5,15 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.1.5] - 2026-10-08
+
+### Added
+
+- Right-click an app in the panel to hide it from the list of other apps that can
+  capture the screen, like Snipping Tool, or to watch it or stop watching it. Hiding
+  doesn't change the app's access. Hidden apps are listed in Settings, with a Show
+  button to bring each one back.
+
 ## [0.1.4] - 2026-10-08
 
 ### Added
@@ -85,6 +94,7 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.1.5]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.5
 [0.1.4]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.4
 [0.1.3]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.3
 [0.1.2]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.2

@@ -19,6 +19,8 @@ public sealed class Settings
     public HashSet<string> Added { get; set; } = [];
     /// <summary>Unwatched apps from the watched developers, by client key.</summary>
     public HashSet<string> Removed { get; set; } = [];
+    /// <summary>Unwatched apps hidden from the panel's list of other apps, by client key.</summary>
+    public HashSet<string> Hidden { get; set; } = [];
     /// <summary>Inbound rules Revoke switched off, by client key, to switch back on later.</summary>
     public Dictionary<string, List<string>> DisabledRules { get; set; } = [];
     /// <summary>How services started before Revoke changed them.</summary>

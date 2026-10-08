@@ -63,6 +63,12 @@
         <TextBlock Style="{StaticResource Footer}" Text="Revoke All Watched and the automatic stops cover these. Apps signed by Anthropic and OpenAI are watched unless you switch them off; any other app with a window open can be added. Helpers an app starts are stopped along with it." />
       </StackPanel>
 
+      <StackPanel x:Name="HiddenSection" Spacing="4" Visibility="Collapsed">
+        <TextBlock Text="Hidden apps" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
+        <StackPanel x:Name="Hidden" Spacing="4" />
+        <TextBlock Style="{StaticResource Footer}" Text="Hidden from the panel's list of other apps that can capture the screen. Hiding an app doesn't change its access. Right-click an app in the panel to hide it." />
+      </StackPanel>
+
       <StackPanel Spacing="4">
         <TextBlock Text="General" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
         <Grid Style="{StaticResource Card}">
