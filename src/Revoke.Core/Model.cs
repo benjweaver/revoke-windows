@@ -13,7 +13,10 @@ public enum Pane { Running, Startup, Service, Screen, Camera, Microphone, Locati
 /// <param name="Stale">Revoke blocked it, but the app has updated since and the block no longer
 /// covers the new version.</param>
 /// <param name="Caution">Off in a way that can break the app, like a service Revoke keeps stopped.</param>
-public sealed record Cell(bool On, bool InUse, bool Enabled, bool NeedsAdmin, bool Stale, string Help, bool Caution = false);
+/// <param name="Active">For a switch that says whether something may run, whether it's running
+/// right now; null where that doesn't apply.</param>
+public sealed record Cell(bool On, bool InUse, bool Enabled, bool NeedsAdmin, bool Stale, string Help,
+    bool Caution = false, bool? Active = null);
 
 /// <param name="Icon">The app's logo file, for packaged apps.</param>
 /// <param name="Deadline">When the time limit will stop it.</param>
@@ -315,19 +318,24 @@ public sealed class Model
         {
             var what = new List<string>();
             if (runningServices.Count > 0) what.Add("is running");
-            what.Add(f.Services.Any(s => s.StartsWithWindows) ? "starts with Windows" : "starts when the app asks");
+            // A packaged app's service starts when its app does, so with Windows only if the
+            // app opens at sign-in; another service set to Automatic starts with Windows.
+            what.Add(f.Services.Any(s => s.StartsWithWindows && !s.Packaged) ? "starts with Windows"
+                : f.Services.Any(s => s.Packaged) ? $"starts when {name} does, so with Windows only if {name} is a startup app"
+                : "starts when the app asks");
             var system = f.Services.Any(s => s.RunsAsSystem) ? ", which runs as SYSTEM," : "";
             help = $"{serviceNames}{system} {string.Join(" and ", what)}. Switch off to stop it and keep it stopped.";
         }
         else if (kept.Count > 0)
         {
             help = kept.Any(s => s.Packaged && s.StartsWithWindows)
-                ? $"Revoke keeps {serviceNames} stopped. Windows only lets {name}'s installer change how it starts, so it still starts with Windows, and Revoke stops it each time. Features of {name} that need it won't work. Switch on to let it run."
+                ? $"Revoke keeps {serviceNames} stopped. Windows only lets {name}'s installer change how it starts, so it can still start when {name} does (with Windows only if {name} is a startup app), and Revoke stops it each time. Features of {name} that need it won't work. Switch on to let it run."
                 : $"Revoke keeps {serviceNames} stopped. Features of {name} that need it won't work. Switch on to let it run.";
         }
         var serviceAdmin = f.Services.Any(s => !s.Packaged);
         cells[Pane.Service] = new Cell(serviceOn, false, f.Services.Count > 0, serviceAdmin, false, help,
-            Caution: !serviceOn && kept.Count > 0);
+            Caution: !serviceOn && kept.Count > 0,
+            Active: f.Services.Count > 0 ? runningServices.Count > 0 : null);
 
         // Privacy switches
         foreach (var pane in new[] { Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location })
