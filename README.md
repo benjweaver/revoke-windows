@@ -23,6 +23,10 @@ so it works on a managed work machine too, unless your organisation blocks unsig
 programs. Only the optional admin helper, installed from Revoke's settings, asks for
 admin.
 
+You can run it from an AI agent's terminal too, like Claude Code's or Codex's. Revoke
+starts outside the agent's app either way (see
+[Running from an agent's terminal](#running-from-an-agents-terminal)).
+
 On macOS, [Revoke for macOS](https://github.com/benjweaver/revoke):
 
 ```sh
@@ -167,6 +171,23 @@ prompt names an unknown publisher. Rules Revoke adds are in the firewall group
 `Revoke`.
 
 Settings live in `%APPDATA%\Revoke\settings.json`. Nothing leaves the PC.
+
+### Running from an agent's terminal
+
+Claude and ChatGPT install as packaged (MSIX) apps, and a terminal inside one, like
+Claude Code's or Codex's, runs in that app's container. So does anything started from
+it. Windows keeps such a program's registry writes, and the new files it puts in
+AppData, in the app's private storage, where nothing else sees them. A Revoke started
+that way would look like it worked while changing nothing: its settings, its "Open at
+sign-in" entry, and its privacy and startup switches would all stay inside Claude's or
+ChatGPT's container. Stopping processes and services is unaffected, since those don't
+go through the registry.
+
+So when Revoke starts, it writes a value to the registry and asks WMI, which reads the
+registry from a Windows service outside any container, whether the value is really
+there. If it isn't, Revoke starts itself again through Explorer, which launches it as
+if you'd opened it from the Start menu, and exits. The install scripts start it through
+Explorer too.
 
 ## Build
 
