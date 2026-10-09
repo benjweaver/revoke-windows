@@ -87,6 +87,18 @@ internal static unsafe partial class Native
     [LibraryImport("user32.dll")]
     public static partial uint GetWindowThreadProcessId(nint hwnd, out uint processId);
 
+    public const uint MB_OK = 0x0;
+    public const uint MB_YESNO = 0x4;
+    public const uint MB_ICONERROR = 0x10;
+    public const uint MB_ICONWARNING = 0x30;
+    public const uint MB_DEFBUTTON2 = 0x100;
+    public const uint MB_SETFOREGROUND = 0x10000;
+    public const uint MB_TOPMOST = 0x40000;
+    public const int IDYES = 6;
+
+    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int MessageBoxW(nint owner, string text, string caption, uint type);
+
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmGetWindowAttribute(nint hwnd, uint attribute, out uint value, uint size);
 }

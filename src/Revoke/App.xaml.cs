@@ -27,6 +27,23 @@ public partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Windows opened Revoke in an app's place, for a link or a file: ask, then go. This
+        // runs beside the Revoke in the tray, or without it, and needs nothing else.
+        var command = Environment.GetCommandLineArgs();
+        if (command is [_, Revoke.Core.Links.Flag, var key, var verb, var target])
+        {
+            Revoke.Core.Links.Handle(key, verb, target);
+            Exit();
+            return;
+        }
+        // The uninstaller puts every app's own entries back. Inside another app's container
+        // that would change nothing, so it says so with exit code 2 instead.
+        if (command is [_, "--restore-links"])
+        {
+            if (Revoke.Core.Container.IsCaptured()) Environment.Exit(2);
+            Revoke.Core.Links.UnblockAll();
+            Environment.Exit(0);
+        }
         // Started from inside another app's container (a terminal in Claude Code or Codex,
         // say), nothing Revoke changed would really change. Start again outside it.
         if (Revoke.Core.Container.IsCaptured())
@@ -59,6 +76,7 @@ public partial class App : Application
             switch (command)
             {
                 case TrayIcon.MenuCommand.RevokeAll: _ = controller.ActAsync(m => m.RevokeAll()); break;
+                case TrayIcon.MenuCommand.EndAll: _ = controller.ActAsync(m => m.EndAll()); break;
                 case TrayIcon.MenuCommand.Settings: ShowSettings(); break;
                 case TrayIcon.MenuCommand.Quit: Quit(); break;
             }
@@ -69,7 +87,7 @@ public partial class App : Application
         await controller.StartAsync();
         panel = new PanelWindow(controller);
         // Settings open by themselves only the first time, to set Revoke up.
-        var background = Environment.GetCommandLineArgs().Contains("--background");
+        var background = command.Contains("--background");
         if (controller.FirstRun && !background) ShowSettings();
     }
 

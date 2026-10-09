@@ -5,6 +5,27 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.2.0] - 2026-10-09
+
+### Added
+
+- A **Links** column. Web pages, emails, documents and other apps can open an agent with
+  a link (`claude://`, `codex://`, `claude-cli://`) or a file (`.skill`), carrying
+  instructions for it, even while it's stopped. Switched off, Revoke opens in the app's
+  place, shows the whole link and what's opening it, and opens the app only if you say
+  so. It needs no admin, keeps working while Revoke isn't running, and takes links back
+  when an app registers them again. Revoke All Watched and the automatic stops switch it
+  off too.
+- **End task** when you right-click a running app in the panel: it stops the app,
+  everything it started, and its service, like switching Running off. Handy for an app,
+  or a helper it left behind, running with no window to close.
+- **End All Tasks**, beside Revoke All Watched and in the tray menu: it stops every
+  watched app that way, and leaves the other switches as they are.
+
+### Changed
+
+- Uninstalling puts every app's links back.
+
 ## [0.1.6] - 2026-10-08
 
 ### Fixed
@@ -102,6 +123,7 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.2.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.2.0
 [0.1.6]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.6
 [0.1.5]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.5
 [0.1.4]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.4

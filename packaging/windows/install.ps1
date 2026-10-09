@@ -36,6 +36,12 @@ param([switch]$Uninstall, [switch]$Update)
 
     if ($Uninstall) {
         Stop-Revoke
+        # Links and files Revoke asks about go back to their apps, or they'd open nothing.
+        if (Test-Path $exe) {
+            $p = Start-Process $exe -ArgumentList '--restore-links' -Wait -PassThru
+            if ($p.ExitCode -eq 2) { throw "This PowerShell runs inside another app's container (like a terminal in Claude Code or Codex), so Revoke can't put apps' links back from here. Run the uninstall from a PowerShell opened from the Start menu." }
+            if ($p.ExitCode -ne 0) { Write-Warning "Putting apps' links back didn't finish (exit code $($p.ExitCode))." }
+        }
         # The helper runs as SYSTEM, so removing it asks for admin. Removing it also
         # switches back on the firewall rules it switched off and deletes Revoke's own.
         if (Get-Service RevokeHelper -ErrorAction SilentlyContinue) {

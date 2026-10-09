@@ -16,7 +16,7 @@ namespace Revoke;
 /// <summary>The panel above the tray icon: one switch per app and column.</summary>
 public sealed partial class PanelWindow : Window
 {
-    const double PanelWidth = 720;
+    const double PanelWidth = 772;
     const double ColumnWidth = 52;
 
     static readonly (Pane Pane, string Glyph, string Short, string Tip)[] Panes =
@@ -24,6 +24,7 @@ public sealed partial class PanelWindow : Window
         (Pane.Running, "\uE768", "Running", "Running: the app and its helpers"),
         (Pane.Startup, "\uE7E8", "Startup", "Opens when you sign in, as in Task Manager's Startup apps"),
         (Pane.Service, "\uE90F", "Service", "A Windows service the app installed, running or starting with Windows"),
+        (Pane.Links, "\uE71B", "Links", "Links and files that open the app, from web pages, documents and other apps. Off, Revoke asks you first"),
         (Pane.Screen, "\uE7F4", "Screen", "Screen capture (Settings › Privacy & security › Screenshots and apps)"),
         (Pane.Camera, "\uE714", "Camera", "Camera"),
         (Pane.Microphone, "\uE720", "Mic", "Microphone"),
@@ -166,7 +167,7 @@ public sealed partial class PanelWindow : Window
             HelperNoticeButton.Content = action;
             HelperNoticeButton.IsEnabled = !view.Busy;
         }
-        RevokeAll.IsEnabled = !view.Busy;
+        RevokeAll.IsEnabled = EndAll.IsEnabled = !view.Busy;
         Spinner.IsActive = view.Busy;
         Activity.Text = view.Activity is { Text.Length: > 0 } a ? $"{a.At:t} · {a.Text}" : "";
         Activity.Foreground = (Brush)Application.Current.Resources[view.Activity?.IsError == true
@@ -299,6 +300,8 @@ public sealed partial class PanelWindow : Window
         await controller.ActAsync(m => m.RevokeAll());
     }
 
+    async void EndAll_Click(object sender, RoutedEventArgs e) => await controller.ActAsync(m => m.EndAll());
+
     /// <summary>
     /// Stopping a service an app installed can break the app: Claude's Cowork features need
     /// CoworkVMService, for one. So the first time, and until "Don't ask again", this says
@@ -367,6 +370,8 @@ public sealed partial class PanelWindow : Window
         readonly TextBlock letter = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
         readonly TextBlock name = new() { TextTrimming = TextTrimming.CharacterEllipsis };
         readonly TextBlock detail = new() { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
+        // Like Task Manager's: for an app, or a helper it left behind, running with no window to close.
+        readonly MenuFlyoutItem endTask = new() { Text = "End task", Icon = new FontIcon { Glyph = "\uE71A" } };
         readonly Dictionary<Pane, CellView> cells = [];
         readonly PanelWindow panel;
         readonly MenuFlyoutItem watch = new() { Text = "Watch", Icon = new FontIcon { Glyph = "\uE7B3" } };
@@ -400,7 +405,10 @@ public sealed partial class PanelWindow : Window
             watch.Click += async (_, _) => await panel.controller.SetWatchedAsync(client, true);
             hide.Click += async (_, _) => await panel.controller.SetHiddenAsync(client, true);
             unwatch.Click += async (_, _) => await panel.controller.SetWatchedAsync(client, false);
+            // What switching Running off does: the app, everything it started, and its service.
+            endTask.Click += async (_, _) => await panel.controller.ActAsync(m => m.Set(client, Pane.Running, false));
             var menu = new MenuFlyout();
+            menu.Items.Add(endTask);
             menu.Items.Add(watch);
             menu.Items.Add(hide);
             menu.Items.Add(unwatch);
@@ -427,6 +435,8 @@ public sealed partial class PanelWindow : Window
             icon.Source = panel.Image(row.Icon);
             glyph.Visibility = row.Icon is null ? Visibility.Visible : Visibility.Collapsed;
             detail.Text = Detail(row);
+            endTask.Visibility = row.IsOn(Pane.Running) ? Visibility.Visible : Visibility.Collapsed;
+            endTask.IsEnabled = !busy;
             SetTip(detail, row.Helpers.Count > 0 ? "Helpers: " + Model.List(row.Helpers) : null);
             foreach (var (pane, cell) in cells) cell.Update(row.Cells[pane], row.Name, busy, askForAdmin);
         }

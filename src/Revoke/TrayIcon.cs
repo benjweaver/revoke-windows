@@ -10,7 +10,7 @@ namespace Revoke;
 /// </summary>
 sealed unsafe partial class TrayIcon : IDisposable
 {
-    public enum MenuCommand { RevokeAll = 1, Settings, Quit }
+    public enum MenuCommand { RevokeAll = 1, Settings, Quit, EndAll }
 
     /// <summary>A left click or Enter on the icon, with the icon's rectangle on screen.</summary>
     public event Action<RECT>? Selected;
@@ -115,6 +115,7 @@ sealed unsafe partial class TrayIcon : IDisposable
     {
         var menu = CreatePopupMenu();
         AppendMenuW(menu, 0, (nuint)MenuCommand.RevokeAll, "Revoke All Watched");
+        AppendMenuW(menu, 0, (nuint)MenuCommand.EndAll, "End All Tasks");
         AppendMenuW(menu, 0, (nuint)MenuCommand.Settings, "Settings…");
         AppendMenuW(menu, 0x800, 0, null); // MF_SEPARATOR
         AppendMenuW(menu, 0, (nuint)MenuCommand.Quit, "Quit Revoke");

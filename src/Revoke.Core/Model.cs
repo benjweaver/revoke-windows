@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Revoke.Core;
 
 /// <summary>A column in the panel.</summary>
-public enum Pane { Running, Startup, Service, Screen, Camera, Microphone, Location, Network }
+public enum Pane { Running, Startup, Service, Links, Screen, Camera, Microphone, Location, Network }
 
 /// <param name="On">Orange: the app can do this now.</param>
 /// <param name="InUse">Doing it this moment (camera, microphone, location, screen capture).</param>
@@ -58,8 +58,9 @@ public sealed class Model
 {
     public static readonly Pane[] AllPanes = Enum.GetValues<Pane>();
 
-    /// <summary>What automatic revocations take away: everything that needs no admin prompt.</summary>
-    static readonly Pane[] Automatic = [Pane.Running, Pane.Startup, Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location];
+    /// <summary>What automatic revocations take away: everything that needs no admin prompt.
+    /// Links too, so nothing can open an app that was stopped while nobody's looking.</summary>
+    static readonly Pane[] Automatic = [Pane.Running, Pane.Startup, Pane.Links, Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location];
 
     /// <summary>Facts about a client gathered from every source.</summary>
     sealed class Facts
@@ -71,6 +72,7 @@ public sealed class Model
         public Dictionary<Capability, ConsentEntry> Consent = [];
         public List<StartupEntry> Startup = [];
         public List<Service> Services = [];
+        public List<LinkHandler> Links = [];
         public List<FirewallRule> Inbound = [];
         public List<FirewallRule> Blocks = [];
         /// <summary>Programs that belong to the client, for firewall rules.</summary>
@@ -126,6 +128,8 @@ public sealed class Model
         services = Services.WithStatus(services);
         procs = Processes.List();
         windows = Processes.WithWindows();
+        // Read every time, so an app registering its links again is caught within a tick.
+        var links = Links.Read();
 
         var all = new SortedDictionary<Client, Facts>();
         Facts For(Client client) => all.TryGetValue(client, out var f) ? f : all[client] = new Facts();
@@ -158,6 +162,12 @@ public sealed class Model
             var f = For(service.Client);
             f.Programs.Add(service.Program);
             f.Services.Add(service);
+        }
+        foreach (var handler in links)
+        {
+            var f = For(handler.Client);
+            if (handler.Program is { } program && File.Exists(program)) f.Programs.Add(program);
+            f.Links.Add(handler);
         }
         var rules = Firewall.Read();
         foreach (var rule in rules ?? [])
@@ -210,7 +220,7 @@ public sealed class Model
         var watched = all.Where(kv => Settings.IsWatched(kv.Key, kv.Value.Publisher ?? "") && kv.Value.Procs.Count > 0).ToList();
         foreach (var (client, f) in watched)
         {
-            if (client.Kind != ClientKind.Exe || f.Startup.Count > 0 || f.Services.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0)
+            if (client.Kind != ClientKind.Exe || f.Startup.Count > 0 || f.Services.Count > 0 || f.Links.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0)
                 continue;
             var pids = f.Procs.Select(p => p.Pid).ToHashSet();
             // The app furthest up the tree wins, so Codex's helpers fold into ChatGPT when ChatGPT started Codex.
@@ -253,7 +263,7 @@ public sealed class Model
             // Desktop programs that have only ever touched the shared switches, and aren't
             // running, have nothing left to revoke.
             var present = f.Package is not null || f.Procs.Count > 0 || f.Startup.Count > 0 || f.Services.Count > 0
-                || f.Inbound.Count > 0 || f.Blocks.Count > 0;
+                || f.Links.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0;
             if (!present || !(isWatched || screenAllowed) || f.HelperOf is not null) continue;
             if (!isWatched && Settings.Hidden.Contains(client.Key)) continue;
             (isWatched ? watched : others).Add(MakeRow(client, f, isWatched, globallyOn));
@@ -338,6 +348,18 @@ public sealed class Model
             Caution: !serviceOn && kept.Count > 0,
             Active: f.Services.Count > 0 ? runningServices.Count > 0 : null);
 
+        // Links: whether web pages, documents and other apps can open it with a link or a
+        // file, which can carry a prompt for it, or Revoke stands in and asks first.
+        var open = f.Links.Where(h => !h.Blocked).ToList();
+        var ways = WaysToOpen(f);
+        if (f.Links.Count == 0)
+            help = $"Nothing else opens {name} with a link or a file.";
+        else if (open.Count > 0)
+            help = $"Web pages, documents and other apps can open {name} with {ways}, which can carry instructions for it. Switch off to have Revoke ask you first, every time.";
+        else
+            help = $"Revoke asks you before {ways} open {name}, and shows what they carry. Switch on to let them open it directly.";
+        cells[Pane.Links] = new Cell(open.Count > 0, false, f.Links.Count > 0, false, false, help);
+
         // Privacy switches
         foreach (var pane in new[] { Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location })
         {
@@ -386,6 +408,23 @@ public sealed class Model
         return new Row(client, name, f.Publisher ?? "", f.Package?.Logo, watched, cells,
             f.Procs.Count + f.Helpers.Sum(h => facts.GetValueOrDefault(h)?.Procs.Count ?? 0),
             f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.Name).ToList(), helpers, DeadlineOf(f), f.Services.Count(s => s.Running));
+    }
+
+    /// <summary>"claude:// links", "codex:// links and .csv and .skill files".</summary>
+    static string WaysToOpen(Facts f)
+    {
+        var schemes = (f.Links.Any(h => !h.IsFile) ? f.Package?.Protocols ?? [] : [])
+            .Concat(f.Links.Select(h => h.Scheme).OfType<string>())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(s => $"{s}://")
+            .ToList();
+        var files = f.Links.Any(h => h.IsFile) ? f.Package?.FileTypes ?? [] : [];
+        var parts = new List<string>();
+        if (schemes.Count > 0) parts.Add($"{List(schemes)} links");
+        else if (f.Links.Any(h => !h.IsFile)) parts.Add("links");
+        if (files.Count > 0) parts.Add($"{List(files)} files");
+        else if (f.Links.Any(h => h.IsFile)) parts.Add("files");
+        return string.Join(" and ", parts);
     }
 
     /// <summary>The programs a client's firewall rules should cover: the ones it has run,
@@ -517,6 +556,12 @@ public sealed class Model
                 var started = f.Services.Where(s => s.StartsWithWindows || s.Packaged).Count(s => Services.TrySet(s.Name, running: true));
                 return started > 0 ? $"Started {List(f.Services.Select(s => s.Name))}" : $"{List(f.Services.Select(s => s.Name))} can run again";
 
+            case Pane.Links:
+                Settings.BlockLinks.Remove(client.Key);
+                Settings.Save();
+                foreach (var handler in f.Links) Links.Unblock(handler);
+                return $"{name} opens from links and files again";
+
             case Pane.Network:
                 var restore = new List<ElevatedOp> { new ElevatedOp.RemoveBlocks(client.Key) };
                 restore.AddRange((Settings.DisabledRules.GetValueOrDefault(client.Key) ?? []).Select(id => new ElevatedOp.SetRuleEnabled(id, true)));
@@ -546,6 +591,7 @@ public sealed class Model
         var disabled = new List<(Client, List<string>)>();
         var serviceStarts = new List<(string, int)>();
         var keepStopped = new List<string>();
+        var blockLinks = new List<string>();
         var killed = 0;
         var killedFor = new HashSet<Client>();
 
@@ -599,6 +645,16 @@ public sealed class Model
                         }
                         break;
 
+                    case Pane.Links:
+                        if (f.Links.Count == 0) break;
+                        blockLinks.Add(client.Key);
+                        foreach (var handler in f.Links.Where(h => !h.Blocked || h.Moved))
+                        {
+                            try { Links.Block(handler); }
+                            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) { errors.Add($"{name}: {e.Message}"); }
+                        }
+                        break;
+
                     case Pane.Network:
                         var active = f.Inbound.Where(r => r.Active).Select(r => r.Id).ToList();
                         ops.AddRange(active.Select(id => new ElevatedOp.SetRuleEnabled(id, false)));
@@ -620,9 +676,10 @@ public sealed class Model
             }
         }
 
-        if (keepStopped.Count > 0)
+        if (keepStopped.Count > 0 || blockLinks.Count > 0)
         {
             Settings.KeepStopped.UnionWith(keepStopped);
+            Settings.BlockLinks.UnionWith(blockLinks);
             try { Settings.Save(); }
             catch (IOException e) { errors.Add(e.Message); }
         }
@@ -706,6 +763,16 @@ public sealed class Model
     /// <summary>Stops and revokes everything for every watched app.</summary>
     public Activity RevokeAll() => Revoke(Snapshot.Watched.Select(r => r.Client).ToList(), AllPanes, null, allowAdmin: true);
 
+    /// <summary>Stops every watched app, everything they started, and their services, as
+    /// switching Running off does, and leaves the other switches as they are.</summary>
+    public Activity EndAll()
+    {
+        Refresh(force: true);
+        var running = Snapshot.Watched.Where(r => r.IsOn(Pane.Running)).Select(r => r.Client).ToList();
+        if (running.Count == 0) return LastActivity = Activity.Now("No watched apps are running");
+        return Revoke(running, [Pane.Running], null, allowAdmin: true);
+    }
+
     // Automatic revoking
 
     /// <summary>Runs every couple of seconds: refreshes, then revokes what the settings say
@@ -752,6 +819,7 @@ public sealed class Model
         }
 
         Activity? activity = KeepServicesStopped() ?? KeepServicesOnDemand();
+        activity = KeepLinksBlocked() ?? activity;
         if (orphans.Count > 0)
         {
             var (n, _) = Processes.KillTree(orphans, self);
@@ -778,6 +846,38 @@ public sealed class Model
         }
         if (stopped.Count == 0) return null;
         return LastActivity = Activity.Now($"Stopped {List(stopped)}, which Revoke keeps stopped");
+    }
+
+    /// <summary>
+    /// Takes links and files back from apps Revoke asks about, when the app registers
+    /// itself for them again (an update re-registers a packaged app's), or when Revoke has
+    /// moved. Needs no admin rights, so it's done
+    /// without asking.
+    /// </summary>
+    Activity? KeepLinksBlocked()
+    {
+        if (Settings.BlockLinks.Count == 0) return null;
+        var retaken = new List<string>();
+        var changed = false;
+        foreach (var (client, f) in facts)
+        {
+            if (!Settings.BlockLinks.Contains(client.Key)) continue;
+            foreach (var handler in f.Links.Where(h => !h.Blocked || h.Moved))
+            {
+                try
+                {
+                    Links.Block(handler);
+                    changed = true;
+                    if (!handler.Blocked) retaken.Add(f.Name ?? FallbackName(client));
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) { }
+            }
+        }
+        if (!changed) return null;
+        Refresh();
+        if (retaken.Count == 0) return null;
+        var names = retaken.Distinct().ToList();
+        return LastActivity = Activity.Now($"{List(names)} registered {(names.Count == 1 ? "its" : "their")} links again, so Revoke took them back");
     }
 
     /// <summary>
@@ -871,6 +971,7 @@ public sealed class Model
         Pane.Running => "Running",
         Pane.Startup => "Startup",
         Pane.Service => "Service",
+        Pane.Links => "Links",
         Pane.Screen => "Screen capture",
         Pane.Camera => "Camera",
         Pane.Microphone => "Microphone",

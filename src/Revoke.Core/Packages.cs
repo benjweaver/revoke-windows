@@ -5,6 +5,8 @@ namespace Revoke.Core;
 /// <param name="Apps">Application IDs, for launching: shell:AppsFolder\&lt;family&gt;!&lt;id&gt;.</param>
 /// <param name="Executables">Executables the manifest declares, relative to the install folder.</param>
 /// <param name="StartupTasks">Each startup task the manifest declares, and whether it's on by default.</param>
+/// <param name="Protocols">Link schemes the app opens: "claude".</param>
+/// <param name="FileTypes">File types the app opens: ".skill".</param>
 public sealed record Package(
     string Family,
     string FullName,
@@ -14,7 +16,9 @@ public sealed record Package(
     string? Logo,
     IReadOnlyList<string> Apps,
     IReadOnlyList<string> Executables,
-    IReadOnlyList<(string TaskId, bool EnabledByDefault)> StartupTasks);
+    IReadOnlyList<(string TaskId, bool EnabledByDefault)> StartupTasks,
+    IReadOnlyList<string> Protocols,
+    IReadOnlyList<string> FileTypes);
 
 /// <summary>Installed packaged (MSIX) apps, from Windows' package manager and their manifests.</summary>
 public static class Packages
@@ -49,7 +53,9 @@ public static class Packages
                     Safe(() => LogoPath(package.Logo)),
                     Attributes(manifest, "Application", "Id"),
                     Attributes(manifest, "Application", "Executable").Select(e => e.Replace('/', '\\')).ToList(),
-                    StartupTasks(manifest)));
+                    StartupTasks(manifest),
+                    Attributes(manifest, "Protocol", "Name").Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                    Texts(manifest, "FileType").Select(t => t.Trim().ToLowerInvariant()).Distinct().ToList()));
             }
             catch (Exception)
             {
@@ -102,6 +108,14 @@ public static class Packages
             if (name.Split(':')[^1] == element) yield return chunk.Split('>')[0];
         }
     }
+
+    /// <summary>The text inside every &lt;element&gt; or &lt;prefix:element&gt;: "&lt;uap:FileType&gt;.csv&lt;/uap:FileType&gt;".</summary>
+    internal static List<string> Texts(string xml, string element) =>
+        xml.Split('<')
+            .Where(chunk => chunk.Contains('>') && chunk[..chunk.IndexOfAny([' ', '>', '/'])].Split(':')[^1] == element)
+            .Select(chunk => chunk[(chunk.IndexOf('>') + 1)..].Trim())
+            .Where(text => text.Length > 0)
+            .ToList();
 
     static string? AttributeIn(string tag, string attribute)
     {

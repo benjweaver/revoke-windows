@@ -67,6 +67,8 @@
 
     <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12">
       <Button x:Name="RevokeAll" Content="Revoke All Watched" Style="{StaticResource AccentButtonStyle}" Click="RevokeAll_Click" />
+      <Button x:Name="EndAll" Content="End All Tasks" Click="EndAll_Click"
+              ToolTipService.ToolTip="Stop every watched app, everything they started, and their services. Other switches stay as they are." />
       <ProgressRing x:Name="Spinner" Width="16" Height="16" IsActive="False" />
       <TextBlock x:Name="Activity" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}"
                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />

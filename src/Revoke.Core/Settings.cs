@@ -27,6 +27,9 @@ public sealed class Settings
     public Dictionary<string, int> ServiceStarts { get; set; } = [];
     /// <summary>Services switched off in Revoke, which it stops whenever they start.</summary>
     public HashSet<string> KeepStopped { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Apps whose links and files Revoke asks about before they open them, by
+    /// client key. Revoke takes them back whenever an app registers itself again.</summary>
+    public HashSet<string> BlockLinks { get; set; } = [];
     /// <summary>The time limit never counts from before it was switched on.</summary>
     public DateTimeOffset LimitStart { get; set; }
     /// <summary>Settings open by themselves only the first time, to set Revoke up.</summary>

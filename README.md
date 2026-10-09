@@ -77,6 +77,7 @@ One row per watched app, one switch per column. A switch is orange while access 
 | Running | The app, its helpers or its service are running | Stops the app, its whole process tree, and its service (which can start again with Windows or when the app asks) |
 | Startup | It opens when you sign in, as Task Manager's Startup apps list shows | Turns off its startup task or Run entry |
 | Service | A Windows service it installed is allowed to run. Task Manager's Startup apps list leaves these out | Stops the service and keeps it stopped until you switch it back on. **This can break the app**: features that need the service stop working. Revoke asks first |
+| Links | Web pages, emails, documents and other apps can open it with a link (`claude://`, `codex://`, `claude-cli://`) or a file it opens (`.skill`, `.csv`) | Revoke opens instead, shows you the whole link and who sent it, and opens the app only if you say so |
 | Screen | It may capture the screen through Windows' screenshot API | Denies it in Settings › Privacy & security |
 | Camera, Mic, Location | It's allowed to use them | Denies it. A red dot means it's using one right now |
 | Network | Devices on your network can connect to it, or it can reach them | Switches off its inbound firewall rules and blocks it from your local network (asks for admin) |
@@ -97,11 +98,38 @@ from the next restart, and sets it again if an app update puts it back. Claude's
 has a start trigger, so Windows starts it when Claude connects to it; Codex starts its
 own.
 
+### Links
+
+A stopped agent isn't out of reach. Any web page can ask the browser to open a
+`claude://`, `codex://` or `claude-cli://` link (Claude Code handles the last one, with
+`--handle-uri`), and the app starts with whatever the link carries; a downloaded
+`.skill` file opens in Codex. That can hand an agent instructions while you're away, or dressed
+up as something else: prompt injection that doesn't wait for the app to be open.
+
+Switching **Links** off puts Revoke in the app's place for every link scheme and file
+type the app registered, so Windows opens Revoke instead. Revoke shows who's opening the
+app (Chrome, Outlook, File Explorer), and the link with its escapes decoded so a prompt
+in it reads as text, and with anything that can hide or reorder text shown as a code.
+**No** is the default answer. Say **Yes** and Revoke opens the app with the link, as
+Windows would have. It asks every time, whether or not the app is running.
+
+The app's own entry stays beside Revoke's, so switching Links back on puts it back. It
+all lives in your part of the registry, so it needs no admin, and it keeps working while
+Revoke isn't running, since what Windows starts is Revoke.exe itself. When an app
+registers its links again, as an update does, Revoke takes them back within a couple of
+seconds while it's running, and says so. Uninstalling Revoke gives every app
+its links back.
+
 **Revoke All Watched** does every column for every watched app, behind one admin
 prompt. Apps signed by Anthropic and OpenAI are watched by default; any other app with
 a window open can be added in Settings. A watched program that only runs because
 another watched app started it (Codex's node and code-mode helpers, Claude Code inside
 Claude) shows in that app's row, and stops with it.
+
+**End All Tasks**, beside it and in the tray menu, only stops the watched apps, everything
+they started, and their services, leaving the other switches as they are. To stop one
+app, right-click it and choose **End task**, as in Task Manager. That's handy for an
+app, or a helper it left behind, running with no window to close.
 
 Below the watched apps, the panel lists other apps allowed to capture the screen.
 Right-click one to watch it, or to hide it from that list, like Snipping Tool; hidden
@@ -115,7 +143,8 @@ It can also stop watched apps automatically, if you turn these on in Settings:
 - **after a time limit**, from 15 minutes to 4 hours after the app started.
 - **when you lock the PC or it sleeps.**
 
-Automatic stops leave services and firewall rules alone, so an admin prompt never
+Automatic stops also switch Links off, so nothing can open an app that was stopped
+behind your back. They leave services and firewall rules alone, so an admin prompt never
 appears out of nowhere.
 
 ## What it found on a real PC
@@ -142,11 +171,17 @@ appears out of nowhere.
 - **Updates move programs.** Packaged apps install each version in a new folder. When
   that happens after Revoke blocked an app, the Network switch shows a warning; switch
   it off again to cover the new version.
+- **Links only cover what goes through Windows' link and file handling.** A program
+  already running as you can start an app directly, with its own command line, or
+  through its app execution alias (`claude-desktop.exe`). Revoke is about what reaches
+  the app from outside: web pages, emails, documents and chat messages. Link schemes
+  registered for every user (in HKEY_LOCAL_MACHINE) aren't covered yet; none of the
+  watched apps uses one.
 
 ## How it changes things
 
-Everything Revoke reads needs no admin rights. Most changes don't either: privacy and
-startup switches live in your part of the registry, and stopping your own processes is
+Everything Revoke reads needs no admin rights. Most changes don't either: privacy,
+startup and link switches live in your part of the registry, and stopping your own processes is
 yours to do. Services, firewall rules and machine-wide startup entries need admin.
 
 Revoke makes those changes through Windows' own interfaces, with no scripts: the
@@ -223,7 +258,8 @@ on a PC without either installed. Building the app also publishes the helper
 (`src/Revoke.Helper`) beside it as one file, `Helper\RevokeHelper.exe`.
 `scripts/make-icons.py` redraws the tray icons.
 
-The tests only read your PC, except for stopping processes they start themselves.
+The tests only read your PC, except for stopping processes they start themselves and
+adding, then removing, made-up link schemes of their own in your part of the registry.
 
 ## Release
 
