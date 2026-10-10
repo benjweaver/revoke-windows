@@ -285,7 +285,7 @@ public sealed class HelperPolicy
         machineStartup.TryGetValue((m.Wow64, m.Name), out var program) && Watched(program)
             ? null : "not a watched developer's startup entry";
 
-    bool Watched(string program) => publisherOf(program) is { } publisher && Settings.WatchedByDefault(publisher);
+    bool Watched(string program) => Settings.WatchedByDefault(Client.FromPath(program), publisherOf(program) ?? "");
 
     static string MachineRunProgram(StartupItem.Run run)
     {

@@ -5,6 +5,17 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.3.1] - 2026-10-10
+
+### Changed
+
+- Cursor, Windsurf and Devin Desktop, Zed, VS Code, VS Code Insiders, VSCodium, Void,
+  Kiro, Trae, Google Antigravity, and the GitHub Copilot app are watched by default, like
+  Claude and ChatGPT, as in Revoke for macOS 1.3.1. Where the signer is a company with
+  lots of other software (Microsoft, GitHub, Amazon, Google) or the app isn't signed,
+  Revoke goes by the folder it installs into, so Word and GitHub Desktop aren't watched.
+  Agent extensions run with their editor's access, so watching the editor covers them.
+
 ## [0.3.0] - 2026-10-09
 
 ### Added

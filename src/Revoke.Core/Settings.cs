@@ -5,8 +5,23 @@ namespace Revoke.Core;
 /// <summary>Preferences, kept in %APPDATA%\Revoke\settings.json. Nothing leaves the PC.</summary>
 public sealed class Settings
 {
-    /// <summary>Apps from these developers are watched unless unchecked.</summary>
-    public static readonly string[] WatchedVendors = ["anthropic", "openai"];
+    /// <summary>Apps from these developers are watched unless unchecked, by the first word
+    /// of the publisher or signer: "Anysphere, Inc." is Cursor, "Exafunction, Inc." is
+    /// Windsurf and Devin Desktop.</summary>
+    public static readonly string[] WatchedVendors = ["anthropic", "openai", "anysphere", "exafunction", "zed"];
+
+    /// <summary>
+    /// Programs watched by the folder they install into, for editors and agents whose
+    /// signer is a company with a lot of unrelated software (Microsoft, GitHub, Amazon,
+    /// Google, ByteDance's Trae), or that aren't signed at all (VSCodium, Void,
+    /// Antigravity). A folder name is matched whole, anywhere in the program's path, so it
+    /// covers installs for one user (%LOCALAPPDATA%\Programs) and for everyone.
+    /// </summary>
+    public static readonly string[] WatchedFolders =
+    [
+        "microsoft vs code", "microsoft vs code insiders", "vscodium", "void",
+        "antigravity", "kiro", "trae", "github copilot",
+    ];
     public static readonly int[] TimeLimits = [15, 30, 60, 120, 240];
 
     /// <summary>Stop a watched app, and revoke its access, once its last window closes,
@@ -71,14 +86,19 @@ public sealed class Settings
         File.Move(temp, FilePath, overwrite: true);
     }
 
-    public static bool WatchedByDefault(string publisher) => WatchedVendors.Contains(Client.VendorKey(publisher));
+    public static bool WatchedByDefault(Client client, string publisher) =>
+        WatchedVendors.Contains(Client.VendorKey(publisher)) || InWatchedFolder(client);
+
+    static bool InWatchedFolder(Client client) =>
+        client.Kind == ClientKind.Exe
+        && client.Id.Split('\\')[..^1].Any(folder => WatchedFolders.Contains(folder));
 
     public bool IsWatched(Client client, string publisher) =>
-        !Removed.Contains(client.Key) && (Added.Contains(client.Key) || WatchedByDefault(publisher));
+        !Removed.Contains(client.Key) && (Added.Contains(client.Key) || WatchedByDefault(client, publisher));
 
     public void SetWatched(Client client, string publisher, bool watched)
     {
-        var byDefault = WatchedByDefault(publisher);
+        var byDefault = WatchedByDefault(client, publisher);
         if (watched)
         {
             Removed.Remove(client.Key);

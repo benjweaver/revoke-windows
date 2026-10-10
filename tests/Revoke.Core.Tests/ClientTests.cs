@@ -28,6 +28,27 @@ public class ClientTests
     [InlineData("OpenAI", "openai")]
     public void VendorsGroupByFirstWord(string publisher, string vendor) => Assert.Equal(vendor, Client.VendorKey(publisher));
 
+    // Signers and install folders read from the apps on Windows 11.
+    [Theory]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\cursor\Cursor.exe", "Anysphere, Inc.", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\Devin\Devin.exe", "Exafunction, Inc.", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\Microsoft VS Code\Code.exe", "Microsoft Corporation", true)]
+    [InlineData(@"C:\Program Files\Microsoft VS Code Insiders\Code - Insiders.exe", "Microsoft Corporation", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\VSCodium\VSCodium.exe", "", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\Void\Void.exe", "", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\antigravity\Antigravity.exe", "", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\Kiro\Kiro.exe", "Amazon.com Services LLC", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\Trae\Trae.exe", "SPRING (SG) PTE. LTD", true)]
+    [InlineData(@"C:\Users\dev\AppData\Local\Programs\GitHub Copilot\github.exe", "GitHub, Inc.", true)]
+    // A shared signer alone isn't enough.
+    [InlineData(@"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE", "Microsoft Corporation", false)]
+    [InlineData(@"C:\Users\dev\AppData\Local\GitHubDesktop\GitHubDesktop.exe", "GitHub, Inc.", false)]
+    [InlineData(@"C:\Program Files\Amazon\AWSCLIV2\aws.exe", "Amazon.com Services LLC", false)]
+    // The folder has to be a whole folder of the program's path, not the program's name.
+    [InlineData(@"C:\Tools\kiro.exe", "", false)]
+    public void CodingAgentsAreWatchedByDefault(string path, string publisher, bool watched) =>
+        Assert.Equal(watched, Settings.WatchedByDefault(Client.FromPath(path), publisher));
+
     [Fact]
     public void ProgramsComeOutOfCommandLines()
     {
