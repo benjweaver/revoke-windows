@@ -54,11 +54,7 @@ public static partial class AdminChanges
                 break;
 
             case ElevatedOp.SetRuleEnabled r:
-                using (var rule = new ManagementObject(new ManagementPath($"{FirewallNamespace}:MSFT_NetFirewallRule.InstanceID=\"{Escape(r.Id)}\"")))
-                {
-                    rule.Get();
-                    rule.InvokeMethod(r.Enabled ? "Enable" : "Disable", null);
-                }
+                SetRuleEnabled(r.Id, r.Enabled);
                 break;
 
             case ElevatedOp.BlockLocalNetwork b:
@@ -80,8 +76,6 @@ public static partial class AdminChanges
     }
 
     /// <summary>Escapes a value for a WMI object path.</summary>
-    static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
-
     /// <summary>One outbound block rule per protocol, through the Windows Firewall COM API.</summary>
     static void AddBlocks(ElevatedOp.BlockLocalNetwork block)
     {
@@ -120,6 +114,31 @@ public static partial class AdminChanges
             return $"Remove Revoke's firewall rules: {e.Message.Trim()}";
         }
     }
+
+    /// <summary>
+    /// Switches one rule on or off by its exact ID. The firewall provider's rules aren't keyed
+    /// by ID (their keys are the policy's names), so a path naming the ID is invalid: the rule
+    /// is looked up instead. Enable and Disable return nothing, and the two-argument
+    /// InvokeMethod throws looking for a return value, so this uses the one that doesn't.
+    /// </summary>
+    static void SetRuleEnabled(string id, bool enabled)
+    {
+        using var searcher = new ManagementObjectSearcher(new ManagementScope(FirewallNamespace),
+            new ObjectQuery($"SELECT * FROM MSFT_NetFirewallRule WHERE InstanceID = '{EscapeWql(id)}'"));
+        var found = false;
+        foreach (ManagementObject rule in searcher.Get())
+        {
+            using (rule)
+            {
+                found = true;
+                rule.InvokeMethod(enabled ? "Enable" : "Disable", null, null)?.Dispose();
+            }
+        }
+        if (!found) throw new InvalidOperationException("the rule is gone");
+    }
+
+    /// <summary>A value for a single-quoted WQL string.</summary>
+    internal static string EscapeWql(string value) => value.Replace("\\", "\\\\").Replace("'", "\\'");
 
     /// <summary>Deletes Revoke's rules with this description, or all of them, each by its own ID.</summary>
     static void RemoveBlocks(string? description)

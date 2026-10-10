@@ -204,13 +204,22 @@ public static class Links
         }
         var answer = Native.MessageBoxW(0, message + $"\n\nOpen {appName}?", "Revoke",
             Native.MB_YESNO | Native.MB_ICONWARNING | Native.MB_DEFBUTTON2 | Native.MB_SETFOREGROUND | Native.MB_TOPMOST);
-        if (answer != Native.IDYES) return;
+        var what = handler.IsFile ? "a file" : "a link";
+        if (answer != Native.IDYES)
+        {
+            // Mid-sentence, "A command (curl.exe)" and "Something" start lowercase.
+            var kept = who.StartsWith("A command", StringComparison.Ordinal) || who == "Something" ? char.ToLowerInvariant(who[0]) + who[1..] : who;
+            Log.Write($"Kept {kept} from opening {appName} with {what}: {target}");
+            return;
+        }
         try
         {
             Open(handler, target);
+            Log.Write($"Opened {appName} with {what} you allowed: {target}");
         }
         catch (Exception e) when (e is IOException or InvalidOperationException or COMException or System.ComponentModel.Win32Exception)
         {
+            Log.Write($"Failed: couldn't open {appName}: {e.Message}");
             Native.MessageBoxW(0, $"Couldn't open {appName}: {e.Message}", "Revoke",
                 Native.MB_OK | Native.MB_ICONERROR | Native.MB_SETFOREGROUND);
         }
@@ -308,18 +317,38 @@ public static class Links
         return shown.ToString();
     }
 
-    /// <summary>The program that asked Windows to open the link, by name, when that's
-    /// something the person would recognise: Chrome, Outlook. Windows' own brokers, which
-    /// pass links on for packaged apps, say nothing useful.</summary>
-    static string? Opener()
+    static string? Opener() => Opener(Processes.List(), (uint)Environment.ProcessId, IsConsole);
+
+    /// <summary>
+    /// The program that asked Windows to open the link, by the name the person knows it by:
+    /// Chrome, Outlook, File Explorer. A command, like curl or a shell, names the app it runs
+    /// in, when there is one: "A command (curl.exe) in Windows Terminal". Windows' own
+    /// brokers, which pass links on for packaged apps, say nothing useful.
+    /// </summary>
+    internal static string? Opener(IReadOnlyList<Proc> procs, uint self, Func<string, bool> isConsole)
     {
-        var procs = Processes.List();
-        var self = procs.FirstOrDefault(p => p.Pid == Environment.ProcessId);
-        var parent = self is null ? null : procs.FirstOrDefault(p => p.Pid == self.Parent && p.Started <= self.Started);
-        if (parent?.Path is not { } path) return null;
-        var file = Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
-        if (file is "svchost" or "sihost" or "runtimebroker" or "dllhost" or "openwith" or "launchwinapp") return null;
-        if (file == "explorer") return "File Explorer";
+        Proc? ParentOf(Proc? child) => child is null ? null
+            : procs.FirstOrDefault(p => p.Pid == child.Parent && p.Pid != child.Pid && p.Started <= child.Started);
+        var parent = ParentOf(procs.FirstOrDefault(p => p.Pid == self));
+        if (parent?.Path is not { } path || IsBroker(path)) return null;
+        if (!isConsole(path)) return AppName(path);
+        var command = Path.GetFileName(path);
+        var ancestor = parent;
+        for (var i = 0; i < 10; i++)
+        {
+            ancestor = ParentOf(ancestor);
+            if (ancestor?.Path is not { } ancestorPath || IsBroker(ancestorPath)) break;
+            if (!isConsole(ancestorPath)) return $"A command ({command}) in {AppName(ancestorPath)}";
+        }
+        return $"A command ({command})";
+    }
+
+    static bool IsBroker(string path) =>
+        Path.GetFileNameWithoutExtension(path).ToLowerInvariant() is "svchost" or "sihost" or "runtimebroker" or "dllhost" or "openwith" or "launchwinapp" or "services" or "wininit";
+
+    static string AppName(string path)
+    {
+        if (Path.GetFileNameWithoutExtension(path).Equals("explorer", StringComparison.OrdinalIgnoreCase)) return "File Explorer";
         try
         {
             var description = FileVersionInfo.GetVersionInfo(path).FileDescription?.Trim();
@@ -329,6 +358,24 @@ public static class Links
         {
             return Path.GetFileName(path);
         }
+    }
+
+    /// <summary>Whether a program runs in a console, like curl, PowerShell or a CLI agent,
+    /// rather than showing windows of its own: its PE header's subsystem says so.</summary>
+    static bool IsConsole(string path)
+    {
+        try
+        {
+            using var file = File.OpenRead(path);
+            using var reader = new BinaryReader(file);
+            file.Position = 0x3C;
+            var header = reader.ReadInt32();
+            // The subsystem sits 68 bytes into the optional header, after the "PE\0\0"
+            // signature and the 20-byte file header. 3 is IMAGE_SUBSYSTEM_WINDOWS_CUI.
+            file.Position = header + 4 + 20 + 68;
+            return reader.ReadUInt16() == 3;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
     }
 
     // Windows' activation manager

@@ -23,6 +23,10 @@ if (-not (Test-Path $dotnet)) { throw 'Building Revoke needs the .NET 10 SDK: wi
 
 Write-Host 'Building a release...'
 Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
+# The app publishes the helper beside it from inside its build, which doesn't restore the
+# helper's packages, so a fresh checkout has to restore it first.
+& $dotnet restore (Join-Path $repo 'src\Revoke.Helper') --nologo -v quiet
+if ($LASTEXITCODE -ne 0) { throw "Restoring the helper failed (exit code $LASTEXITCODE)." }
 & $dotnet publish (Join-Path $repo 'src\Revoke') -c Release -o $publish --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw "The build failed (exit code $LASTEXITCODE)." }
 if (-not (Test-Path (Join-Path $publish 'Helper\RevokeHelper.exe'))) { throw 'The build has no helper in it.' }

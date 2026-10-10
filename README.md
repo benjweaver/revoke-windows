@@ -1,12 +1,90 @@
 # Revoke for Windows
 
-A notification-area app that shows what AI agents such as Claude, ChatGPT/Codex and
+A notification-area app that shows what AI agents such as Claude, ChatGPT/Codex, and
 Claude Code can do on your PC, and takes it away: it stops them along with everything
 they started, switches off their privacy access, keeps them from starting by
-themselves, and closes the firewall rules that let your network reach them.
+themselves, and closes the firewall rules that let your network reach them. It also
+stops web pages, emails, and documents from opening an agent with a link that carries a
+prompt.
 
 It's the Windows counterpart of [Revoke for macOS](https://github.com/benjweaver/revoke),
 built natively with WinUI 3.
+
+## What it does
+
+macOS gates screen recording and input control behind permissions only System Settings
+can grant, so Revoke for macOS takes those permissions back. Windows gates far less:
+any app you run can read the screen and drive other apps, with no permission at all.
+On Windows, the only way to take that away is to stop the app. So Revoke stops it,
+and every process it started: Claude Code sessions, Codex's helpers, MCP servers, and
+whatever those ran.
+
+One row per watched app, one switch per column. A switch is orange while access is on.
+The tray lock is open while any watched app is running or can capture the screen.
+
+| Column | On means | Switching off |
+|---|---|---|
+| Running | The app, its helpers, or its service are running | Stops the app, its whole process tree, and its service (which can start again with Windows or when the app asks) |
+| Startup | It opens when you sign in, as Task Manager's Startup apps list shows | Turns off its startup task or Run entry |
+| Service | A Windows service it installed is allowed to run. Task Manager's Startup apps list leaves these out | Stops the service and keeps it stopped until you switch it back on. **This can break the app**: features that need the service stop working. Revoke asks first |
+| Links | Web pages, emails, documents, and other apps can open it with a link (`claude://`, `codex://`, `claude-cli://`) or a file it opens (`.skill`, `.csv`) | Revoke opens instead, shows you the whole link and who sent it, and opens the app only if you say so (below) |
+| Screen | It may capture the screen through Windows' screenshot API | Denies it in Settings › Privacy & security |
+| Camera, Mic, Location | It's allowed to use them | Denies it. A red dot means it's using one right now |
+| Network | Devices on your network can connect to it, or it can reach them | Switches off its inbound firewall rules and blocks it from your local network (asks for admin) |
+
+Switching Running on opens the app. Switching a privacy column back on opens Settings,
+where only you can grant access.
+
+Apps install services because they need them: Claude's Cowork features run in
+CoworkVMService, for one. Switching one off means Revoke stops it whenever it starts, at
+boot or when the app starts it, until you switch it back on. Revoke confirms before
+stopping a service, and marks one it keeps stopped.
+
+Claude's and ChatGPT's services start with Windows. To keep the apps working but stop
+that, Revoke sets them to start only when the apps start them, once the admin helper is
+installed (switch **Apps' services start only when the apps start them** off in Settings
+to leave them be). Windows' service API lets only the package installer change a
+packaged app's service, so Revoke sets it to Manual in the service's registry key,
+through the admin helper, from the next restart, and sets it again if an app update puts
+it back. Claude's service has a start trigger, so Windows starts it when Claude connects
+to it; Codex starts its own.
+
+**Revoke all watched** does every column for every watched app, stopping them included,
+behind one admin prompt. Apps signed by Anthropic and OpenAI are watched by default; any
+other app with a window open can be added in Settings. A watched program that only runs
+because another watched app started it (Codex's node and code-mode helpers, Claude Code
+inside Claude) shows in that app's row, and stops with it. A line under an app's name
+says what it is when its name doesn't, like "Includes Codex" under ChatGPT.
+
+**End all tasks**, beside it and in the tray menu, only stops the watched apps,
+everything they started, and their services, leaving the other switches as they are. To
+stop one app, switch its Running off, or right-click it and choose **End task**, as in
+Task Manager. That's handy for an app, or a helper it left behind, running with no
+window to close.
+
+Below the watched apps, the panel lists other apps allowed to capture the screen.
+Right-click one to watch it, or to hide it from that list, like Snipping Tool; hidden
+apps are listed in Settings, where you can show them again. Hiding an app doesn't change
+its access. Right-click a watched app to stop watching it.
+
+It can also act automatically, if you turn these on in Settings:
+
+- **when an app's last window closes** (on unless you switch it off). Claude and ChatGPT
+  keep running in the notification area after you close their windows. This stops them
+  instead, and also stops anything they started that's still running after they quit.
+- **when a watched app quits.** Every watched app from the same developer has its links,
+  startup, and privacy switches turned off once none of them has a window open, so
+  quitting ChatGPT also covers Codex Computer Use. Programs still running, like Claude
+  Code in a terminal, keep running.
+- **after a time limit**, from 15 minutes to 4 hours after the app started.
+- **when you lock the PC or it sleeps.**
+
+Automatic stops also switch Links off, so nothing can open an app that was stopped
+behind your back. They leave services and firewall rules alone, so an admin prompt never
+appears out of nowhere.
+
+Everything Revoke does is logged, in `%LOCALAPPDATA%\Revoke\Revoke.log`: each change,
+each automatic stop, and each link it stood in for, with what you answered.
 
 ## Install
 
@@ -59,104 +137,6 @@ Otherwise, download `Revoke-<version>-windows-x64.zip` from the
 against `SHA256SUMS`, unzip it anywhere and run `Revoke.exe`. Or build it yourself,
 as described under [Build](#build).
 
-## Why it stops apps
-
-macOS gates screen recording and input control behind permissions only System Settings
-can grant, so Revoke for macOS takes those permissions back. Windows gates far less:
-any app you run can read the screen and drive other apps, with no permission at all.
-On Windows, the only way to take that away is to stop the app. So Revoke stops it,
-and every process it started: Claude Code sessions, Codex's helpers, MCP servers, and
-whatever those ran.
-
-## What it shows and switches
-
-One row per watched app, one switch per column. A switch is orange while access is on.
-
-| Column | On means | Switching off |
-|---|---|---|
-| Running | The app, its helpers or its service are running | Stops the app, its whole process tree, and its service (which can start again with Windows or when the app asks) |
-| Startup | It opens when you sign in, as Task Manager's Startup apps list shows | Turns off its startup task or Run entry |
-| Service | A Windows service it installed is allowed to run. Task Manager's Startup apps list leaves these out | Stops the service and keeps it stopped until you switch it back on. **This can break the app**: features that need the service stop working. Revoke asks first |
-| Links | Web pages, emails, documents and other apps can open it with a link (`claude://`, `codex://`, `claude-cli://`) or a file it opens (`.skill`, `.csv`) | Revoke opens instead, shows you the whole link and who sent it, and opens the app only if you say so |
-| Screen | It may capture the screen through Windows' screenshot API | Denies it in Settings › Privacy & security |
-| Camera, Mic, Location | It's allowed to use them | Denies it. A red dot means it's using one right now |
-| Network | Devices on your network can connect to it, or it can reach them | Switches off its inbound firewall rules and blocks it from your local network (asks for admin) |
-
-Switching a privacy column back on opens Settings, where only you can grant access.
-
-Apps install services because they need them: Claude's Cowork features run in
-CoworkVMService, for one. Switching one off means Revoke stops it whenever it starts, at
-boot or when the app starts it, until you switch it back on. Revoke confirms before
-stopping a service, and marks one it keeps stopped.
-
-Claude's and ChatGPT's services start with Windows. To keep the apps working but stop
-that, Revoke sets them to start only when the apps start them, once the admin helper is
-installed (switch **Apps' services start only when the apps start them** off in Settings
-to leave them be). Windows' service API lets only the package installer change a packaged app's service,
-so Revoke sets it to Manual in the service's registry key, through the admin helper,
-from the next restart, and sets it again if an app update puts it back. Claude's service
-has a start trigger, so Windows starts it when Claude connects to it; Codex starts its
-own.
-
-### Links
-
-A stopped agent isn't out of reach. Any web page can ask the browser to open a
-`claude://`, `codex://` or `claude-cli://` link (Claude Code handles the last one, with
-`--handle-uri`), and the app starts with whatever the link carries; a downloaded
-`.skill` file opens in Codex. That can hand an agent instructions while you're away, or dressed
-up as something else: prompt injection that doesn't wait for the app to be open.
-
-Switching **Links** off puts Revoke in the app's place for every link scheme and file
-type the app registered, so Windows opens Revoke instead. Revoke shows who's opening the
-app (Chrome, Outlook, File Explorer), and the link with its escapes decoded so a prompt
-in it reads as text, and with anything that can hide or reorder text shown as a code.
-**No** is the default answer. Say **Yes** and Revoke opens the app with the link, as
-Windows would have. It asks every time, whether or not the app is running.
-
-The app's own entry stays beside Revoke's, so switching Links back on puts it back. It
-all lives in your part of the registry, so it needs no admin, and it keeps working while
-Revoke isn't running, since what Windows starts is Revoke.exe itself. When an app
-registers its links again, as an update does, Revoke takes them back within a couple of
-seconds while it's running, and says so. Uninstalling Revoke gives every app
-its links back.
-
-**Revoke All Watched** does every column for every watched app, behind one admin
-prompt. Apps signed by Anthropic and OpenAI are watched by default; any other app with
-a window open can be added in Settings. A watched program that only runs because
-another watched app started it (Codex's node and code-mode helpers, Claude Code inside
-Claude) shows in that app's row, and stops with it.
-
-**End All Tasks**, beside it and in the tray menu, only stops the watched apps, everything
-they started, and their services, leaving the other switches as they are. To stop one
-app, right-click it and choose **End task**, as in Task Manager. That's handy for an
-app, or a helper it left behind, running with no window to close.
-
-Below the watched apps, the panel lists other apps allowed to capture the screen.
-Right-click one to watch it, or to hide it from that list, like Snipping Tool; hidden
-apps are listed in Settings, where you can show them again.
-
-It can also stop watched apps automatically, if you turn these on in Settings:
-
-- **when an app's last window closes.** Claude and ChatGPT keep running in the
-  notification area after you close their windows. This stops them instead, and also
-  stops anything they started that's still running after they quit.
-- **after a time limit**, from 15 minutes to 4 hours after the app started.
-- **when you lock the PC or it sleeps.**
-
-Automatic stops also switch Links off, so nothing can open an app that was stopped
-behind your back. They leave services and firewall rules alone, so an admin prompt never
-appears out of nowhere.
-
-## What it found on a real PC
-
-- Claude installs **CoworkVMService**, which runs as LocalSystem and starts with
-  Windows, with firewall rules that let any device on the network connect to it.
-- ChatGPT installs **CodexSandboxService**, also LocalSystem and automatic.
-- Both apps have inbound firewall rules for their main programs, created when they
-  asked to "allow access" on first launch.
-- Codex runs Computer Use, a node runtime and a code-mode host as separate programs,
-  signed by OpenAI.
-
 ## What it can't do, and why
 
 - **No permission controls input or screen reading.** Stopping the app is the only lever.
@@ -174,15 +154,19 @@ appears out of nowhere.
 - **Links only cover what goes through Windows' link and file handling.** A program
   already running as you can start an app directly, with its own command line, or
   through its app execution alias (`claude-desktop.exe`). Revoke is about what reaches
-  the app from outside: web pages, emails, documents and chat messages. Link schemes
+  the app from outside: web pages, emails, documents, and chat messages. Link schemes
   registered for every user (in HKEY_LOCAL_MACHINE) aren't covered yet; none of the
   watched apps uses one.
+- **Nothing gates one program driving another.** Windows doesn't ask before a program
+  controls another through COM or UI Automation, reads its files, or sends it input.
+  macOS has an Automation permission for this, which Revoke for macOS revokes; on
+  Windows, stopping the app is the lever.
 
 ## How it changes things
 
 Everything Revoke reads needs no admin rights. Most changes don't either: privacy,
 startup and link switches live in your part of the registry, and stopping your own processes is
-yours to do. Services, firewall rules and machine-wide startup entries need admin.
+yours to do. Services, firewall rules, and machine-wide startup entries need admin.
 
 Revoke makes those changes through Windows' own interfaces, with no scripts: the
 Service Control Manager for services, the firewall's management provider to switch
@@ -236,6 +220,39 @@ there. If it isn't, Revoke starts itself again through Explorer, which launches 
 if you'd opened it from the Start menu, and exits. The install scripts start it through
 Explorer too.
 
+## Links
+
+A stopped agent isn't out of reach. Any web page can ask the browser to open a
+`claude://`, `codex://`, or `claude-cli://` link (Claude Code handles the last one, with
+`--handle-uri`), and the app starts with whatever the link carries; a downloaded
+`.skill` file opens in Codex. That can hand an agent instructions while you're away, or dressed
+up as something else: prompt injection that doesn't wait for the app to be open.
+
+Switching **Links** off puts Revoke in the app's place for every link scheme and file
+type the app registered, so Windows opens Revoke instead. Revoke shows who's opening the
+app (Chrome, Outlook, File Explorer, or "A command (curl.exe) in Windows Terminal"), and the link with its escapes decoded so a prompt
+in it reads as text, and with anything that can hide or reorder text shown as a code.
+**No** is the default answer. Say **Yes** and Revoke opens the app with the link, as
+Windows would have. It asks every time, whether or not the app is running.
+
+The app's own entry stays beside Revoke's, so switching Links back on puts it back. It
+all lives in your part of the registry, so it needs no admin, and it keeps working while
+Revoke isn't running, since what Windows starts is Revoke.exe itself. When an app
+registers its links again, as an update does, Revoke takes them back within a couple of
+seconds while it's running, and says so. To give every app its links back, as before
+Revoke stood in, choose **Give back** under Links in Settings. Uninstalling Revoke does
+that too.
+
+## What it found on a real PC
+
+- Claude installs **CoworkVMService**, which runs as LocalSystem and starts with
+  Windows, with firewall rules that let any device on the network connect to it.
+- ChatGPT installs **CodexSandboxService**, also LocalSystem and automatic.
+- Both apps have inbound firewall rules for their main programs, created when they
+  asked to "allow access" on first launch.
+- Codex runs Computer Use, a node runtime, and a code-mode host as separate programs,
+  signed by OpenAI.
+
 ## Build
 
 Needs the .NET 10 SDK (`winget install Microsoft.DotNet.SDK.10`). Windows 10 2004 or
@@ -260,6 +277,10 @@ on a PC without either installed. Building the app also publishes the helper
 
 The tests only read your PC, except for stopping processes they start themselves and
 adding, then removing, made-up link schemes of their own in your part of the registry.
+
+## Support
+
+Revoke is free. If it's useful, you can [support its development](https://benjweaver.dev/support/revoke).
 
 ## Release
 

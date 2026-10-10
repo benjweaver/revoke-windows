@@ -5,6 +5,40 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [0.3.0] - 2026-10-09
+
+### Added
+
+- **When a watched app quits**, in Settings: once the last open app from a developer
+  quits, Revoke switches off links, startup, and the privacy switches for all of that
+  developer's watched apps, as Revoke for macOS does. Off by default.
+- **Give back** under a new Links section in Settings, which gives every app its own
+  links and files back, as uninstalling does.
+- A log of everything Revoke does, in `%LOCALAPPDATA%\Revoke\Revoke.log`: each change,
+  each automatic stop, and each link it stood in for, with what you answered.
+- A line under ChatGPT ("Includes Codex"), Claude's Claude Code ("Runs Claude's Code
+  tab"), and Codex Computer Use, saying what each is, in the panel and Settings.
+
+### Changed
+
+- When a command opens a link, like `curl` or a script in a terminal, the question says
+  which app it runs in: "A command (curl.exe) in Windows Terminal".
+- Buttons and menus use Windows' sentence case: **Revoke all watched**, **End all
+  tasks**.
+- Lists in messages use the serial comma: "Claude, ChatGPT, and Claude Code".
+- Claude Code installed with winget is named Claude Code.
+- Settings says what Windows doesn't let Revoke do about links and about one program
+  driving another.
+
+### Fixed
+
+- Switching Network off, and Revoke all watched, failed with "Disable rule {…}: Invalid
+  object path" for any app with inbound firewall rules, such as Claude's and ChatGPT's
+  "allow access" rules, so those rules stayed on. Revoke now finds each rule by its ID and
+  switches it off and back on. Update the admin helper in Settings after installing.
+- Building from a fresh checkout with `scripts\install.ps1` or `scripts\release.ps1`
+  failed because the helper's packages weren't restored.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
@@ -123,6 +157,7 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.3.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.3.0
 [0.2.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.2.0
 [0.1.6]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.6
 [0.1.5]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.5

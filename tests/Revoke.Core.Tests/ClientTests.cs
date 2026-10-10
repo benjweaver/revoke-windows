@@ -41,4 +41,24 @@ public class ClientTests
         foreach (var client in new[] { Client.Package("A_b"), Client.FromPath(@"c:\x\1.2.3\y.exe") })
             Assert.Equal(client, Client.FromKey(client.Key));
     }
+
+    [Fact]
+    public void NamesAndRolesMatchRevokeForMacOS()
+    {
+        Assert.Equal("Claude Code", Model.KnownName(@"C:\Users\Ben\AppData\Local\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe\claude.exe"));
+        Assert.Equal("Claude Code", Model.KnownName(@"C:\Users\Ben\.local\bin\claude.exe"));
+        Assert.Equal("Includes Codex", Model.RoleOf(Client.Package("OpenAI.Codex_2p2nqsd0c76g0")));
+        Assert.Equal("Runs Claude's Code tab", Model.RoleOf(Client.FromPath(@"C:\Users\Ben\AppData\Roaming\Claude\claude-code\2.1.284\claude.exe")));
+        Assert.Null(Model.RoleOf(Client.FromPath(@"C:\Users\Ben\.local\bin\claude.exe")));
+        Assert.Null(Model.RoleOf(Client.Package("Claude_pzs8sxrjxfjjc")));
+    }
+
+    [Fact]
+    public void ListsUseTheSerialComma()
+    {
+        Assert.Equal("", Model.List([]));
+        Assert.Equal("Claude", Model.List(["Claude"]));
+        Assert.Equal("Claude and ChatGPT", Model.List(["Claude", "ChatGPT"]));
+        Assert.Equal("Claude, ChatGPT, and Claude Code", Model.List(["Claude", "ChatGPT", "Claude Code"]));
+    }
 }

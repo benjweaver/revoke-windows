@@ -20,6 +20,7 @@ public sealed record Cell(bool On, bool InUse, bool Enabled, bool NeedsAdmin, bo
 
 /// <param name="Icon">The app's logo file, for packaged apps.</param>
 /// <param name="Deadline">When the time limit will stop it.</param>
+/// <param name="Role">A line under the name for apps whose name alone doesn't say what they are.</param>
 public sealed record Row(
     Client Client,
     string Name,
@@ -32,7 +33,8 @@ public sealed record Row(
     IReadOnlyList<string> Services,
     IReadOnlyList<string> Helpers,
     DateTimeOffset? Deadline,
-    int RunningServices = 0)
+    int RunningServices = 0,
+    string? Role = null)
 {
     public bool IsOn(Pane pane) => Cells.TryGetValue(pane, out var cell) && cell.On;
 }
@@ -50,7 +52,7 @@ public sealed record Activity(DateTimeOffset At, string Text, bool IsError)
     public static Activity Now(string text, bool isError = false) => new(DateTimeOffset.Now, text, isError);
 }
 
-public sealed record KnownApp(Client Client, string Name, string Publisher, bool Watched, string? Icon);
+public sealed record KnownApp(Client Client, string Name, string Publisher, bool Watched, string? Icon, string? Role = null);
 
 /// <summary>What every source says right now, gathered into one row per app, and
 /// everything that revokes access. Not thread-safe: one caller at a time.</summary>
@@ -61,6 +63,10 @@ public sealed class Model
     /// <summary>What automatic revocations take away: everything that needs no admin prompt.
     /// Links too, so nothing can open an app that was stopped while nobody's looking.</summary>
     static readonly Pane[] Automatic = [Pane.Running, Pane.Startup, Pane.Links, Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location];
+
+    /// <summary>What quitting an app takes away: the same, except stopping what's still
+    /// running, like a Claude Code session in a terminal that the person left open.</summary>
+    static readonly Pane[] OnQuit = [Pane.Startup, Pane.Links, Pane.Screen, Pane.Camera, Pane.Microphone, Pane.Location];
 
     /// <summary>Facts about a client gathered from every source.</summary>
     sealed class Facts
@@ -87,6 +93,10 @@ public sealed class Model
     {
         public bool HadWindow;
         public int WindowlessTicks;
+        /// <summary>Running last tick, and whether it had a window open since it started, so
+        /// an app quitting can be told from a helper that ends.</summary>
+        public bool WasRunning;
+        public bool Opened;
         /// <summary>Everything the client was running last tick, and what those started, so
         /// helpers it leaves behind when it quits can be stopped too.</summary>
         public List<Proc> Tree = [];
@@ -94,7 +104,18 @@ public sealed class Model
 
     public Settings Settings { get; }
     public Snapshot Snapshot { get; private set; } = Snapshot.Empty;
-    public Activity? LastActivity { get; private set; }
+
+    /// <summary>The last thing Revoke did, for the panel. Each one goes in the log too.</summary>
+    public Activity? LastActivity
+    {
+        get => lastActivity;
+        private set
+        {
+            lastActivity = value;
+            if (value is { Text.Length: > 0 }) Log.Write(value.IsError ? $"Failed: {value.Text}" : value.Text);
+        }
+    }
+    Activity? lastActivity;
 
     List<Package> packages = [];
     List<Service> services = [];
@@ -355,7 +376,7 @@ public sealed class Model
         if (f.Links.Count == 0)
             help = $"Nothing else opens {name} with a link or a file.";
         else if (open.Count > 0)
-            help = $"Web pages, documents and other apps can open {name} with {ways}, which can carry instructions for it. Switch off to have Revoke ask you first, every time.";
+            help = $"Web pages, documents, and other apps can open {name} with {ways}, which can carry instructions for it. Switch off to have Revoke ask you first, every time.";
         else
             help = $"Revoke asks you before {ways} open {name}, and shows what they carry. Switch on to let them open it directly.";
         cells[Pane.Links] = new Cell(open.Count > 0, false, f.Links.Count > 0, false, false, help);
@@ -407,7 +428,8 @@ public sealed class Model
         var helpers = f.Helpers.Select(h => facts.GetValueOrDefault(h)?.Name ?? FallbackName(h)).Distinct().ToList();
         return new Row(client, name, f.Publisher ?? "", f.Package?.Logo, watched, cells,
             f.Procs.Count + f.Helpers.Sum(h => facts.GetValueOrDefault(h)?.Procs.Count ?? 0),
-            f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.Name).ToList(), helpers, DeadlineOf(f), f.Services.Count(s => s.Running));
+            f.Procs.Any(p => windows.Contains(p.Pid)), f.Services.Select(s => s.Name).ToList(), helpers, DeadlineOf(f), f.Services.Count(s => s.Running),
+            RoleOf(client));
     }
 
     /// <summary>"claude:// links", "codex:// links and .csv and .skill files".</summary>
@@ -462,7 +484,7 @@ public sealed class Model
                 || (f.Package is not null && (f.Consent.Count > 0 || f.Startup.Count > 0 || f.Inbound.Count > 0));
         })
         .Select(kv => new KnownApp(kv.Key, kv.Value.Name ?? FallbackName(kv.Key), kv.Value.Publisher ?? "",
-            Settings.IsWatched(kv.Key, kv.Value.Publisher ?? ""), kv.Value.Package?.Logo))
+            Settings.IsWatched(kv.Key, kv.Value.Publisher ?? ""), kv.Value.Package?.Logo, RoleOf(kv.Key)))
         .OrderByDescending(a => a.Watched)
         .ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
         .ToList();
@@ -756,7 +778,7 @@ public sealed class Model
             text = $"Stopped {List(stopped)}, and revoked {revokedWhat} for {List(revokedFor)}";
         }
         if (reason is not null) text += $" when {reason}";
-        if (skippedAdmin) text += ". Services and firewall rules need you to click Revoke All";
+        if (skippedAdmin) text += ". Services and firewall rules need you to click Revoke all watched";
         return LastActivity = Activity.Now(text, errors.Count > 0);
     }
 
@@ -773,6 +795,17 @@ public sealed class Model
         return Revoke(running, [Pane.Running], null, allowAdmin: true);
     }
 
+    /// <summary>Gives every app back its own links and files, as before Revoke stood in, and
+    /// stops asking about them: for before Revoke is removed.</summary>
+    public Activity GiveAllLinksBack()
+    {
+        Settings.BlockLinks.Clear();
+        Settings.Save();
+        var count = Links.UnblockAll();
+        Refresh(force: true);
+        return LastActivity = Activity.Now(count == 0 ? "No app's links needed giving back" : "Gave every app its links back");
+    }
+
     // Automatic revoking
 
     /// <summary>Runs every couple of seconds: refreshes, then revokes what the settings say
@@ -784,6 +817,7 @@ public sealed class Model
         var orphans = new List<Proc>();
         var now = DateTimeOffset.Now;
         var alive = procs.Select(p => (p.Pid, p.Started)).ToHashSet();
+        var quit = new List<Row>();
 
         foreach (var row in Snapshot.Watched)
         {
@@ -815,6 +849,13 @@ public sealed class Model
             }
             watch.Tree = procs.Where(p => roots.Contains(p.Pid) || below.Contains(p.Pid)).ToList();
 
+            // An app that had a window open and isn't running any more quit, or was stopped.
+            var running = own.Count > 0;
+            if (running && row.HasWindow) watch.Opened = true;
+            if (watch.WasRunning && !running && watch.Opened) quit.Add(row);
+            if (!running) watch.Opened = false;
+            watch.WasRunning = running;
+
             if (row.Deadline is { } deadline && deadline <= now) due.Add((row.Client, "its time limit ran out"));
         }
 
@@ -826,7 +867,25 @@ public sealed class Model
             if (n > 0) activity = LastActivity = Activity.Now($"Stopped {n} process{(n == 1 ? "" : "es")} a watched app left running when it quit");
         }
         foreach (var (client, reason) in due) activity = Revoke([client], Automatic, reason, allowAdmin: false);
+        if (Settings.RevokeOnQuit)
+        {
+            foreach (var row in quit) activity = AppQuit(row) ?? activity;
+        }
         return activity;
+    }
+
+    /// <summary>
+    /// Quitting a watched app revokes every watched app from its developer, once none of
+    /// them has a window open, as Revoke for macOS does. Quitting ChatGPT also covers Codex
+    /// Computer Use, which runs without a window.
+    /// </summary>
+    Activity? AppQuit(Row row)
+    {
+        var vendor = Client.VendorKey(row.Publisher);
+        List<Row> team = vendor.Length == 0 ? [row]
+            : Snapshot.Watched.Where(r => Client.VendorKey(r.Publisher) == vendor).ToList();
+        if (team.Any(r => r.HasWindow)) return null;
+        return Revoke(team.Select(r => r.Client).ToList(), OnQuit, $"{row.Name} quit", allowAdmin: false);
     }
 
     /// <summary>
@@ -989,9 +1048,23 @@ public sealed class Model
     internal static string? KnownName(string path)
     {
         var pattern = Client.Pattern(path);
-        if (pattern.EndsWith(@"\claude\claude-code\*\claude.exe") || pattern.EndsWith(@"\.local\bin\claude.exe")) return "Claude Code";
+        if (pattern.EndsWith(@"\claude\claude-code\*\claude.exe") || pattern.EndsWith(@"\.local\bin\claude.exe")
+            || (pattern.Contains(@"\winget\packages\anthropic.claudecode_") && pattern.EndsWith(@"\claude.exe"))) return "Claude Code";
         if (pattern.EndsWith(@"\openai\codex\bin\*\codex.exe")) return "Codex CLI";
         if (pattern.EndsWith(@"\codex-computer-use-swift.exe")) return "Codex Computer Use";
+        return null;
+    }
+
+    /// <summary>A line under the name for apps whose name alone doesn't say what they are,
+    /// as Revoke for macOS shows.</summary>
+    internal static string? RoleOf(Client client)
+    {
+        // OpenAI renamed the Codex app ChatGPT, keeping Codex's package name.
+        if (client.Family?.StartsWith("OpenAI.Codex_", StringComparison.OrdinalIgnoreCase) == true) return "Includes Codex";
+        if (client.Kind != ClientKind.Exe) return null;
+        // The Claude Code that Claude's Code tab runs, which Claude keeps in its own folder.
+        if (client.Id.EndsWith(@"\claude\claude-code\*\claude.exe")) return "Runs Claude's Code tab";
+        if (client.Id.EndsWith(@"\codex-computer-use-swift.exe")) return "ChatGPT's computer use agent";
         return null;
     }
 
@@ -1010,7 +1083,7 @@ public sealed class Model
     static string StartsOnDemand(IEnumerable<Service> services) =>
         services.Any(s => s.HasStartTrigger) ? " Windows also starts it whenever an app asks for it." : "";
 
-    /// <summary>"A", "A and B", "A, B and C".</summary>
+    /// <summary>"A", "A and B", "A, B, and C".</summary>
     public static string List(IEnumerable<string> items)
     {
         var list = items.ToList();
@@ -1018,7 +1091,8 @@ public sealed class Model
         {
             0 => "",
             1 => list[0],
-            _ => $"{string.Join(", ", list[..^1])} and {list[^1]}",
+            2 => $"{list[0]} and {list[1]}",
+            _ => $"{string.Join(", ", list[..^1])}, and {list[^1]}",
         };
     }
 }

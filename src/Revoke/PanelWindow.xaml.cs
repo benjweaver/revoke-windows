@@ -24,7 +24,7 @@ public sealed partial class PanelWindow : Window
         (Pane.Running, "\uE768", "Running", "Running: the app and its helpers"),
         (Pane.Startup, "\uE7E8", "Startup", "Opens when you sign in, as in Task Manager's Startup apps"),
         (Pane.Service, "\uE90F", "Service", "A Windows service the app installed, running or starting with Windows"),
-        (Pane.Links, "\uE71B", "Links", "Links and files that open the app, from web pages, documents and other apps. Off, Revoke asks you first"),
+        (Pane.Links, "\uE71B", "Links", "Links and files that open the app, from web pages, documents, and other apps. Off, Revoke asks you first"),
         (Pane.Screen, "\uE7F4", "Screen", "Screen capture (Settings › Privacy & security › Screenshots and apps)"),
         (Pane.Camera, "\uE714", "Camera", "Camera"),
         (Pane.Microphone, "\uE720", "Mic", "Microphone"),
@@ -173,7 +173,7 @@ public sealed partial class PanelWindow : Window
         Activity.Foreground = (Brush)Application.Current.Resources[view.Activity?.IsError == true
             ? "SystemFillColorCriticalBrush" : "TextFillColorSecondaryBrush"];
         SetTip(Activity, Activity.Text);
-        Footnote.Text = "Switching camera, microphone, location or screen capture on opens Settings, because only you can grant access there."
+        Footnote.Text = "Switching camera, microphone, location, or screen capture on opens Settings, because only you can grant access there."
             + (view.HelperInstalled ? "" : " Services and firewall rules ask for admin, unless you install the helper in Settings.");
 
         // Sections and rows, rebuilt only when the set or order changes, so a switch with
@@ -200,8 +200,10 @@ public sealed partial class PanelWindow : Window
             {
                 List.Children.Add(key switch
                 {
-                    "#watched" => SectionTitle("Watched"),
-                    "#others" => SectionTitle("Other apps that can capture the screen · right-click one to hide it"),
+                    "#watched" => SectionTitle("Watched",
+                        "Apps Revoke looks after: Revoke all watched and the automatic options cover them. Right-click one to end it or stop watching it, or choose in Settings."),
+                    "#others" => SectionTitle("Other apps that can capture the screen",
+                        "Apps you don't watch that Windows lets capture the screen. Revoke lists them but never revokes them by itself. Right-click one to watch it or hide it."),
                     "#none" => new TextBlock
                     {
                         Text = "No watched apps are installed or running.",
@@ -216,14 +218,19 @@ public sealed partial class PanelWindow : Window
         if (IsShown) Place();
     }
 
-    static TextBlock SectionTitle(string text) => new()
+    static TextBlock SectionTitle(string text, string? tip = null)
     {
-        Text = text,
-        Margin = new Thickness(8, 8, 8, 4),
-        Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
-    };
+        var title = new TextBlock
+        {
+            Text = text,
+            Margin = new Thickness(8, 8, 8, 4),
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+        };
+        SetTip(title, tip);
+        return title;
+    }
 
     void BuildColumnTitles()
     {
@@ -441,7 +448,10 @@ public sealed partial class PanelWindow : Window
             foreach (var (pane, cell) in cells) cell.Update(row.Cells[pane], row.Name, busy, askForAdmin);
         }
 
-        static string Detail(Row row)
+        /// <summary>What the app is, when its name doesn't say, then how it's running.</summary>
+        static string Detail(Row row) => row.Role is { } role ? $"{role} · {Status(row)}" : Status(row);
+
+        static string Status(Row row)
         {
             if (row.Deadline is { } deadline) return $"Stops at {deadline:t}";
             if (!row.IsOn(Pane.Running)) return "Not running";
@@ -472,7 +482,7 @@ public sealed partial class PanelWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
         };
         readonly TextBlock dash = new() { Text = "–", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        // Using it right now: camera, microphone, location or screen capture.
+        // Using it right now: camera, microphone, location, or screen capture.
         readonly Ellipse live = new()
         {
             Width = 8, Height = 8,

@@ -41,6 +41,14 @@
           <ToggleSwitch x:Name="RevokeOnClose" Grid.Column="1" Toggled="Option_Toggled" AutomationProperties.Name="When a watched app's last window closes" />
         </Grid>
         <Grid Style="{StaticResource Card}">
+          <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="When a watched app quits" />
+            <TextBlock Style="{StaticResource Hint}" Text="Once the last open app from a developer quits, switches off links, startup, and the privacy switches for all of that developer's watched apps. Quitting ChatGPT also covers Codex Computer Use. Programs still running, like Claude Code in a terminal, keep running." />
+          </StackPanel>
+          <ToggleSwitch x:Name="RevokeOnQuit" Grid.Column="1" Toggled="Option_Toggled" AutomationProperties.Name="When a watched app quits" />
+        </Grid>
+        <Grid Style="{StaticResource Card}">
           <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <StackPanel VerticalAlignment="Center">
             <TextBlock Text="After a time limit" />
@@ -54,13 +62,26 @@
           <TextBlock Text="When you lock the PC or it sleeps" VerticalAlignment="Center" />
           <ToggleSwitch x:Name="RevokeOnLock" Grid.Column="1" Toggled="Option_Toggled" AutomationProperties.Name="When you lock the PC or it sleeps" />
         </Grid>
-        <TextBlock Style="{StaticResource Footer}" Text="Stopping automatically also turns off startup and the privacy switches, but leaves services and firewall rules alone, because changing those asks for admin. Revoke All Watched covers everything." />
+        <TextBlock Style="{StaticResource Footer}" Text="Stopping automatically also switches off links, startup, and the privacy switches, so nothing can open an app that was stopped behind your back. It leaves services and firewall rules alone, because changing those asks for admin. Revoke all watched covers everything." />
       </StackPanel>
 
       <StackPanel Spacing="4">
         <TextBlock Text="Watched apps" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
         <StackPanel x:Name="Apps" Spacing="4" />
-        <TextBlock Style="{StaticResource Footer}" Text="Revoke All Watched and the automatic stops cover these. Apps signed by Anthropic and OpenAI are watched unless you switch them off; any other app with a window open can be added. Helpers an app starts are stopped along with it." />
+        <TextBlock Style="{StaticResource Footer}" Text="Revoke all watched and the automatic stops cover these. Apps signed by Anthropic and OpenAI are watched unless you switch them off; any other app with a window open can be added. Helpers an app starts are stopped along with it." />
+      </StackPanel>
+
+      <StackPanel Spacing="4">
+        <TextBlock Text="Links" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
+        <Grid Style="{StaticResource Card}">
+          <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Give all links back" />
+            <TextBlock Style="{StaticResource Hint}" Text="Makes each app open its own links and files again, as before Revoke stood in. Uninstalling Revoke does this too." />
+          </StackPanel>
+          <Button x:Name="GiveLinksBack" Grid.Column="1" Content="Give back" Click="GiveLinksBack_Click" />
+        </Grid>
+        <TextBlock Style="{StaticResource Footer}" Text="Web pages, emails, and documents can open an agent with a link (claude://, codex://, claude-cli://) or a file (.skill), carrying instructions for it, even while it's stopped. Switch an app's Links off in the panel and Windows opens Revoke instead, which shows you the link and opens the app only if you say yes." />
       </StackPanel>
 
       <StackPanel x:Name="HiddenSection" Spacing="4" Visibility="Collapsed">
@@ -104,7 +125,7 @@
           <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <StackPanel VerticalAlignment="Center">
             <TextBlock Text="Quit Revoke" />
-            <TextBlock Style="{StaticResource Hint}" Text="Nothing is stopped or revoked while it's closed." />
+            <TextBlock Style="{StaticResource Hint}" Text="Nothing is stopped or revoked automatically while Revoke isn't running." />
           </StackPanel>
           <Button Grid.Column="1" Content="Quit" Click="Quit_Click" />
         </Grid>
@@ -114,8 +135,10 @@
         <TextBlock Text="What Windows doesn't let Revoke do" Style="{StaticResource BodyStrongTextBlockStyle}" />
         <TextBlock Style="{StaticResource Hint}" Text="• Windows has no permission for controlling other apps or reading the screen: any app you run can do both. Stopping the app is the only way to take that away, which is why Revoke stops apps rather than only switching settings off." />
         <TextBlock Style="{StaticResource Hint}" Text="• The screen capture switch only covers Windows' screenshot API. Older ways of reading the screen don't ask." />
-        <TextBlock Style="{StaticResource Hint}" Text="• Desktop programs like Claude Code share one camera, microphone and location switch with every other desktop program, so Revoke can show when they use one but not switch it off for them alone." />
+        <TextBlock Style="{StaticResource Hint}" Text="• Desktop programs like Claude Code share one camera, microphone, and location switch with every other desktop program, so Revoke can show when they use one but not switch it off for them alone." />
         <TextBlock Style="{StaticResource Hint}" Text="• Firewall rules name programs, not process trees: a command an app runs, like curl, isn't covered by the app's block." />
+        <TextBlock Style="{StaticResource Hint}" Text="• Links only cover what goes through Windows' link and file handling. A program already running as you can start an app directly, with its own command line or its app execution alias." />
+        <TextBlock Style="{StaticResource Hint}" Text="• Windows doesn't ask before one program drives another through COM or UI Automation, or reads its files. There's no permission to take away, so stopping the app is the lever." />
         <TextBlock Style="{StaticResource Hint}" Text="• Revoke only switches access on by opening Settings, where you grant it yourself." />
       </StackPanel>
     </StackPanel>

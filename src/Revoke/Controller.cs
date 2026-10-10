@@ -10,6 +10,7 @@ sealed record View(
     Activity? Activity,
     bool Busy,
     bool RevokeOnClose,
+    bool RevokeOnQuit,
     bool RevokeAfterLimit,
     int LimitMinutes,
     bool RevokeOnLock,
@@ -20,9 +21,10 @@ sealed record View(
     bool AskBeforeStoppingServices,
     bool ServicesStartOnDemand,
     IReadOnlyList<KnownApp> Known,
-    IReadOnlyList<KnownApp> Hidden)
+    IReadOnlyList<KnownApp> Hidden,
+    bool LinksGuarded)
 {
-    public static readonly View Empty = new(Snapshot.Empty, null, false, true, false, 30, false, false, false, true, false, true, false, [], []);
+    public static readonly View Empty = new(Snapshot.Empty, null, false, true, false, false, 30, false, false, false, true, false, true, false, [], [], false);
 }
 
 /// <summary>
@@ -190,6 +192,7 @@ sealed class Controller
         m.LastActivity,
         busy,
         m.Settings.RevokeOnClose,
+        m.Settings.RevokeOnQuit,
         m.Settings.RevokeAfterLimit,
         m.Settings.LimitMinutes,
         m.Settings.RevokeOnLock,
@@ -200,7 +203,8 @@ sealed class Controller
         m.Settings.AskBeforeStoppingServices,
         m.Settings.ServicesStartOnDemand,
         m.KnownApps(),
-        m.HiddenApps());
+        m.HiddenApps(),
+        m.Settings.BlockLinks.Count > 0);
 
     void Publish(View view)
     {

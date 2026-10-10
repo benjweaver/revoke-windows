@@ -53,6 +53,9 @@ $stage = Join-Path $dist 'Revoke'
 Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Building Revoke $version..."
+# The app publishes the helper from inside its build, which doesn't restore it.
+& $dotnet restore (Join-Path $repo 'src\Revoke.Helper') -p:Platform=x64 --nologo -v quiet
+if ($LASTEXITCODE -ne 0) { throw "Restoring the helper failed (exit code $LASTEXITCODE)." }
 & $dotnet publish (Join-Path $repo 'src\Revoke') -c Release -p:Platform=x64 -o $stage --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw "The build failed (exit code $LASTEXITCODE)." }
 foreach ($required in 'Revoke.exe', 'Revoke.pri', 'Helper\RevokeHelper.exe') {

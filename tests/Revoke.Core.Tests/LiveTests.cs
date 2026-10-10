@@ -46,7 +46,10 @@ public class LiveTests(ITestOutputHelper output)
     {
         var folder = Directory.CreateTempSubdirectory("revoke-test-");
         var previous = Settings.FilePath;
+        var previousLog = Log.FilePath;
         Settings.FilePath = Path.Combine(folder.FullName, "settings.json");
+        // What the test does goes in a log of its own, not the person's.
+        Log.FilePath = Path.Combine(folder.FullName, "Revoke.log");
         try
         {
             var exe = Path.Combine(folder.FullName, "revoke-standin.exe");
@@ -85,6 +88,7 @@ public class LiveTests(ITestOutputHelper output)
         finally
         {
             Settings.FilePath = previous;
+            Log.FilePath = previousLog;
             for (var i = 0; i < 20; i++)
             {
                 try { folder.Delete(recursive: true); break; }
@@ -136,6 +140,40 @@ public class LiveTests(ITestOutputHelper output)
         output.WriteLine($"{watch.ElapsedMilliseconds} ms: {string.Join(" | ", failures)}");
         Assert.Single(failures);
         Assert.StartsWith("Stop RevokeNoSuchService:", failures[0]);
+    }
+
+    /// <summary>
+    /// Switches a real inbound allow rule off and on by its ID, as Revoke does for an app's
+    /// "allow access" rules, then deletes it. Needs admin, so it only runs elevated.
+    /// </summary>
+    [Fact]
+    public void SwitchesAnInboundRuleOffAndOnByItsId()
+    {
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        Assert.SkipUnless(new System.Security.Principal.WindowsPrincipal(identity).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator),
+            "Changing firewall rules needs admin.");
+        var name = $"Revoke test {Guid.NewGuid():N}";
+        void Netsh(string arguments)
+        {
+            using var netsh = Process.Start(new ProcessStartInfo("netsh.exe", arguments) { CreateNoWindow = true, UseShellExecute = false })!;
+            netsh.WaitForExit();
+            Assert.Equal(0, netsh.ExitCode);
+        }
+        FirewallRule Rule() => Firewall.Read()!.Single(r => r.Name == name);
+        Netsh($"advfirewall firewall add rule name=\"{name}\" dir=in action=allow program=\"{Environment.SystemDirectory}\\PING.EXE\" enable=yes");
+        try
+        {
+            var id = Rule().Id;
+            Assert.True(Rule().Active);
+            Assert.Empty(AdminChanges.Apply([new ElevatedOp.SetRuleEnabled(id, false)]));
+            Assert.False(Rule().Active);
+            Assert.Empty(AdminChanges.Apply([new ElevatedOp.SetRuleEnabled(id, true)]));
+            Assert.True(Rule().Active);
+        }
+        finally
+        {
+            Netsh($"advfirewall firewall delete rule name=\"{name}\"");
+        }
     }
 
     /// <summary>Reads everything and prints what the panel would show.</summary>

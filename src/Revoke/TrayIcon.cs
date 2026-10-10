@@ -114,8 +114,8 @@ sealed unsafe partial class TrayIcon : IDisposable
     void ShowMenu(int x, int y)
     {
         var menu = CreatePopupMenu();
-        AppendMenuW(menu, 0, (nuint)MenuCommand.RevokeAll, "Revoke All Watched");
-        AppendMenuW(menu, 0, (nuint)MenuCommand.EndAll, "End All Tasks");
+        AppendMenuW(menu, 0, (nuint)MenuCommand.RevokeAll, "Revoke all watched");
+        AppendMenuW(menu, 0, (nuint)MenuCommand.EndAll, "End all tasks");
         AppendMenuW(menu, 0, (nuint)MenuCommand.Settings, "Settings…");
         AppendMenuW(menu, 0x800, 0, null); // MF_SEPARATOR
         AppendMenuW(menu, 0, (nuint)MenuCommand.Quit, "Quit Revoke");

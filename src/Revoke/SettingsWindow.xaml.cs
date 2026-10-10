@@ -39,6 +39,8 @@ public sealed partial class SettingsWindow : Window
     {
         updating = true;
         RevokeOnClose.IsOn = view.RevokeOnClose;
+        RevokeOnQuit.IsOn = view.RevokeOnQuit;
+        GiveLinksBack.IsEnabled = view.LinksGuarded && !view.Busy;
         RevokeAfterLimit.IsOn = view.RevokeAfterLimit;
         RevokeOnLock.IsOn = view.RevokeOnLock;
         LaunchAtLogin.IsOn = view.LaunchAtLogin;
@@ -145,7 +147,7 @@ public sealed partial class SettingsWindow : Window
         text.Children.Add(new TextBlock { Text = app.Name });
         text.Children.Add(new TextBlock
         {
-            Text = app.Publisher.Length > 0 ? app.Publisher : "Unsigned",
+            Text = (app.Publisher.Length > 0 ? app.Publisher : "Unsigned") + (app.Role is { } role ? $" · {role}" : ""),
             Style = FindStyle("Hint"),
         });
         ToolTipService.SetToolTip(text, app.Client.Key);
@@ -183,6 +185,7 @@ public sealed partial class SettingsWindow : Window
         await controller.ChangeSettingsAsync(settings =>
         {
             if (toggle == RevokeOnClose) settings.RevokeOnClose = on;
+            else if (toggle == RevokeOnQuit) settings.RevokeOnQuit = on;
             else if (toggle == RevokeOnLock) settings.RevokeOnLock = on;
             else if (toggle == RevokeAfterLimit) settings.SetRevokeAfterLimit(on);
             else if (toggle == AskBeforeStoppingServices) settings.AskBeforeStoppingServices = on;
@@ -200,6 +203,8 @@ public sealed partial class SettingsWindow : Window
         var view = controller.View;
         await controller.SetHelperAsync(install: !view.HelperInstalled || !view.HelperRunning || !view.HelperCurrent);
     }
+
+    async void GiveLinksBack_Click(object sender, RoutedEventArgs e) => await controller.ActAsync(m => m.GiveAllLinksBack());
 
     void Quit_Click(object sender, RoutedEventArgs e) => App.Current.Quit();
 

@@ -12,6 +12,9 @@ public sealed class Settings
     /// <summary>Stop a watched app, and revoke its access, once its last window closes,
     /// rather than leaving it in the notification area.</summary>
     public bool RevokeOnClose { get; set; } = true;
+    /// <summary>Revoke a developer's watched apps' links, startup and privacy access once the
+    /// last of them quits. Off by default, as on macOS.</summary>
+    public bool RevokeOnQuit { get; set; }
     public bool RevokeAfterLimit { get; set; }
     public int LimitMinutes { get; set; } = 30;
     public bool RevokeOnLock { get; set; }

@@ -39,6 +39,32 @@ public class LinksTests
         Assert.EndsWith("(500 more characters)", Links.Shown(new string('a', 2000)));
     }
 
+    [Fact]
+    public void NamesWhatOpenedALink()
+    {
+        const uint revoke = 50;
+        // Console programs: curl, the shell that ran it, and a CLI agent.
+        var console = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { @"C:\Windows\System32\curl.exe", @"C:\Windows\System32\cmd.exe", @"C:\Tools\claude.exe" };
+        string? Opener(params Proc[] procs) => Links.Opener(procs, revoke, console.Contains);
+        Proc P(uint pid, uint parent, string path, long started = 10) => new(pid, parent, Path.GetFileName(path), path, null, started);
+        var me = P(revoke, 40, @"C:\Programs\Revoke\Revoke.exe", 100);
+
+        // An app opened it itself.
+        Assert.Equal("chrome.exe", Opener(P(40, 1, @"C:\Chrome\chrome.exe"), me));
+        Assert.Equal("File Explorer", Opener(P(40, 1, @"C:\Windows\explorer.exe"), me));
+        // A command names the app it runs in, past the shell and a CLI agent.
+        Assert.Equal("A command (curl.exe) in WindowsTerminal.exe", Opener(
+            P(10, 1, @"C:\Terminal\WindowsTerminal.exe", 1), P(20, 10, @"C:\Windows\System32\cmd.exe", 2),
+            P(30, 20, @"C:\Tools\claude.exe", 3), P(40, 30, @"C:\Windows\System32\curl.exe", 4), me));
+        // With no app above it, just the command.
+        Assert.Equal("A command (curl.exe)", Opener(P(40, 1, @"C:\Windows\System32\curl.exe"), me));
+        // Windows' brokers say nothing useful.
+        Assert.Null(Opener(P(40, 1, @"C:\Windows\System32\svchost.exe"), me));
+        // A parent ID reused by a later process isn't the parent.
+        Assert.Null(Opener(P(40, 1, @"C:\Chrome\chrome.exe", 200), me));
+    }
+
     /// <summary>Stands in for a made-up desktop scheme and a made-up packaged ProgID, in this
     /// user's registry, then puts both back as they were.</summary>
     [Fact]
