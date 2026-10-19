@@ -70,7 +70,7 @@ public partial class App : Application
 
         controller = new Controller(ui);
         tray = new TrayIcon();
-        tray.Selected += rect => panel?.Toggle(rect);
+        tray.Selected += (rect, keyboard) => panel?.Toggle(rect, keyboard);
         tray.Command += command =>
         {
             switch (command)

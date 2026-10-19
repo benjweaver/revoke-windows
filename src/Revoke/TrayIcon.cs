@@ -12,8 +12,9 @@ sealed unsafe partial class TrayIcon : IDisposable
 {
     public enum MenuCommand { RevokeAll = 1, Settings, Quit, EndAll }
 
-    /// <summary>A left click or Enter on the icon, with the icon's rectangle on screen.</summary>
-    public event Action<RECT>? Selected;
+    /// <summary>A left click or Enter on the icon, with the icon's rectangle on screen and
+    /// whether it came from the keyboard.</summary>
+    public event Action<RECT, bool>? Selected;
     public event Action<MenuCommand>? Command;
     public event Action<string>? Locked;
 
@@ -111,6 +112,9 @@ sealed unsafe partial class TrayIcon : IDisposable
         return new RECT { left = point.x, top = point.y, right = point.x, bottom = point.y };
     }
 
+    static bool PointerOver(RECT rect) =>
+        GetCursorPos(out var point) && point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
+
     void ShowMenu(int x, int y)
     {
         var menu = CreatePopupMenu();
@@ -134,7 +138,10 @@ sealed unsafe partial class TrayIcon : IDisposable
             {
                 case 0x400: // NIN_SELECT
                 case 0x401: // NIN_KEYSELECT
-                    Selected?.Invoke(IconRect());
+                    // Windows 11 reports Space and Enter on the icon as NIN_SELECT, as for a
+                    // click, so the pointer says which it was: a click has it over the icon.
+                    var rect = IconRect();
+                    Selected?.Invoke(rect, (lParam & 0xFFFF) == 0x401 || !PointerOver(rect));
                     break;
                 case 0x7B: // WM_CONTEXTMENU
                     ShowMenu((short)(wParam & 0xFFFF), (short)((wParam >> 16) & 0xFFFF));

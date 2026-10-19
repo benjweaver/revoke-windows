@@ -2,6 +2,14 @@ using Windows.Management.Deployment;
 
 namespace Revoke.Core;
 
+/// <summary>An app's logo: <paramref name="Path"/> for dark backgrounds, or any background
+/// when there's only one, and <paramref name="OnLight"/> drawn for light ones, when the
+/// package has it, as the taskbar uses in light mode.</summary>
+public sealed record AppLogo(string Path, string? OnLight = null)
+{
+    public string For(bool lightBackground) => lightBackground ? OnLight ?? Path : Path;
+}
+
 /// <param name="Apps">Application IDs, for launching: shell:AppsFolder\&lt;family&gt;!&lt;id&gt;.</param>
 /// <param name="Executables">Executables the manifest declares, relative to the install folder.</param>
 /// <param name="StartupTasks">Each startup task the manifest declares, and whether it's on by default.</param>
@@ -13,7 +21,7 @@ public sealed record Package(
     string Name,
     string Publisher,
     string InstallPath,
-    string? Logo,
+    AppLogo? Logo,
     IReadOnlyList<string> Apps,
     IReadOnlyList<string> Executables,
     IReadOnlyList<(string TaskId, bool EnabledByDefault)> StartupTasks,
@@ -50,7 +58,7 @@ public static class Packages
                     Safe(() => package.DisplayName) ?? package.Id.Name,
                     Safe(() => package.PublisherDisplayName) ?? "",
                     install,
-                    Safe(() => LogoPath(package.Logo)),
+                    Safe(() => Logo(install, manifest, package.Logo)),
                     Attributes(manifest, "Application", "Id"),
                     Attributes(manifest, "Application", "Executable").Select(e => e.Replace('/', '\\')).ToList(),
                     StartupTasks(manifest),
@@ -65,7 +73,7 @@ public static class Packages
         return packages;
     }
 
-    static string? Safe(Func<string?> read)
+    static T? Safe<T>(Func<T?> read) where T : class
     {
         try { return read(); }
         catch (Exception) { return null; }
@@ -75,6 +83,53 @@ public static class Packages
     {
         try { return File.ReadAllText(Path.Combine(install, "AppxManifest.xml")); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
+    }
+
+    /// <summary>
+    /// The logo the taskbar shows: the app's Square44x44Logo in its unplated forms, one for
+    /// dark backgrounds and one ("lightunplated") for light ones. Without those, the Store
+    /// logo, which is drawn for the app's colored tile and can vanish on a card: ChatGPT's
+    /// is white, on a blue tile.
+    /// </summary>
+    static AppLogo? Logo(string install, string manifest, Uri? storeLogo)
+    {
+        if (Attributes(manifest, "VisualElements", "Square44x44Logo").FirstOrDefault() is { } square
+            && Path.GetDirectoryName(Path.Combine(install, square.Replace('/', '\\'))) is { } folder
+            && Directory.Exists(folder))
+        {
+            var names = Directory.EnumerateFiles(folder).Select(Path.GetFileName).OfType<string>().ToList();
+            var stem = Path.GetFileNameWithoutExtension(square);
+            if (Unplated(names, stem, "unplated") is { } dark)
+            {
+                var light = Unplated(names, stem, "lightunplated");
+                return new AppLogo(Path.Combine(folder, dark), light is null ? null : Path.Combine(folder, light));
+            }
+        }
+        return LogoPath(storeLogo) is { } path ? new AppLogo(path) : null;
+    }
+
+    /// <summary>The "&lt;stem&gt;.targetsize-48_altform-&lt;form&gt;.png" file among
+    /// <paramref name="names"/>: the smallest size of at least 48 pixels, which the panel
+    /// draws at 150% and up, or else the biggest there is.</summary>
+    internal static string? Unplated(IEnumerable<string> names, string stem, string form)
+    {
+        var prefix = stem + ".targetsize-";
+        var suffix = "_altform-" + form + ".png";
+        string? best = null;
+        var bestSize = 0;
+        foreach (var name in names)
+        {
+            if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                || !name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                || !int.TryParse(name.AsSpan(prefix.Length, name.Length - prefix.Length - suffix.Length), out var size))
+            {
+                continue;
+            }
+            var better = best is null
+                || (size >= 48 ? bestSize < 48 || size < bestSize : bestSize < 48 && size > bestSize);
+            if (better) (best, bestSize) = (name, size);
+        }
+        return best;
     }
 
     /// <summary>The logo file. Packages name logos by scale ("StoreLogo.scale-100.png"),
