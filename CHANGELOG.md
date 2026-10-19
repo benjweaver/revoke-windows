@@ -7,6 +7,16 @@ from its section below.
 
 ## [Unreleased]
 
+### Changed
+
+- Revoke uses about a third of the CPU it did while it waits in the tray. In a Windows 11
+  on Arm virtual machine with Claude and ChatGPT open, it used 1.4 seconds of every 30
+  (4.7% of one core), and now uses 0.5 (1.7%). It still looks every two seconds, so it
+  notices an app starting, quitting, or registering its links again as quickly as before.
+  It reads links and firewall rules again only when Windows says they changed, lists
+  processes in one call and opens only new ones, asks only about apps' own services, and
+  reads installed apps again only when one is installed, updated, or removed.
+
 ### Fixed
 
 - The panel follows a switch between light and dark mode while Revoke runs. The line

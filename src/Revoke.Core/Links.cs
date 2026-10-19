@@ -41,6 +41,10 @@ public static class Links
     /// <summary>The Revoke.exe Windows opens in an app's place.</summary>
     public static string? Program { get; set; } = Environment.ProcessPath;
 
+    /// <summary>Tells when anything changes in your part of Software\Classes, where apps
+    /// register links and file types, so they're read again only then.</summary>
+    public static RegistryWatch Watch() => new(Registry.CurrentUser, Classes, subtree: true);
+
     /// <summary>Every packaged app's link and file ProgIDs, and every desktop program's link
     /// schemes, registered for this user.</summary>
     public static List<LinkHandler> Read()

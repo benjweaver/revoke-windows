@@ -188,4 +188,31 @@ public static class Packages
             .Where(t => t.Id is not null)
             .Select(t => (t.Id!, t.Enabled))
             .ToList();
+
+    /// <summary>The full names, which include the version, of the packages <see cref="Installed"/>
+    /// reads. Much quicker than reading them, which goes through every app's resources for its
+    /// name and logo, so it tells when one was installed, updated, or removed.</summary>
+    public static HashSet<string> FullNames()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var package in new PackageManager().FindPackagesForUser(string.Empty))
+            {
+                try
+                {
+                    if (!package.IsFramework && !package.IsResourcePackage) names.Add(package.Id.FullName);
+                }
+                catch (Exception)
+                {
+                    // Being installed or removed right now; the next look gets it.
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // As Installed() finds nothing too.
+        }
+        return names;
+    }
 }

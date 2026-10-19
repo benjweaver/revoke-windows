@@ -2,10 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace Revoke.Core;
 
-/// <summary>The Win32 calls .NET doesn't wrap: process trees, package identity and windows.</summary>
+/// <summary>The Win32 calls .NET doesn't wrap: process trees, package identity, windows, and
+/// quick looks at services and the registry.</summary>
 internal static unsafe partial class Native
 {
-    public const uint TH32CS_SNAPPROCESS = 0x2;
     public const uint PROCESS_TERMINATE = 0x1;
     public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     public const uint GW_OWNER = 4;
@@ -13,31 +13,42 @@ internal static unsafe partial class Native
     public const int WS_EX_TOOLWINDOW = 0x80;
     public const uint DWMWA_CLOAKED = 14;
 
+    public const int SystemProcessInformation = 5;
+    public const int STATUS_INFO_LENGTH_MISMATCH = unchecked((int)0xC0000004);
+
     [StructLayout(LayoutKind.Sequential)]
-    public struct PROCESSENTRY32W
+    public struct UNICODE_STRING
     {
-        public uint dwSize;
-        public uint cntUsage;
-        public uint th32ProcessID;
-        public nuint th32DefaultHeapID;
-        public uint th32ModuleID;
-        public uint cntThreads;
-        public uint th32ParentProcessID;
-        public int pcPriClassBase;
-        public uint dwFlags;
-        public fixed char szExeFile[260];
+        public ushort Length;
+        public ushort MaximumLength;
+        public char* Buffer;
     }
 
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    public static partial nint CreateToolhelp32Snapshot(uint flags, uint processId);
+    /// <summary>
+    /// The start of each entry NtQuerySystemInformation returns for SystemProcessInformation.
+    /// winternl.h keeps the creation time and the parent's ID in fields it calls reserved;
+    /// this is the full layout, unchanged since Windows NT, which Toolhelp32 reads too.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SYSTEM_PROCESS_INFORMATION
+    {
+        public uint NextEntryOffset;
+        public uint NumberOfThreads;
+        public long WorkingSetPrivateSize;
+        public uint HardFaultCount;
+        public uint NumberOfThreadsHighWatermark;
+        public ulong CycleTime;
+        public long CreateTime;
+        public long UserTime;
+        public long KernelTime;
+        public UNICODE_STRING ImageName;
+        public int BasePriority;
+        public nint UniqueProcessId;
+        public nint InheritedFromUniqueProcessId;
+    }
 
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool Process32FirstW(nint snapshot, ref PROCESSENTRY32W entry);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool Process32NextW(nint snapshot, ref PROCESSENTRY32W entry);
+    [LibraryImport("ntdll.dll")]
+    public static partial int NtQuerySystemInformation(int infoClass, void* buffer, uint length, out uint returnLength);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     public static partial nint OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint processId);
@@ -101,4 +112,43 @@ internal static unsafe partial class Native
 
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmGetWindowAttribute(nint hwnd, uint attribute, out uint value, uint size);
+
+    public const uint SC_MANAGER_CONNECT = 0x1;
+    public const uint SERVICE_QUERY_STATUS = 0x4;
+    public const uint SERVICE_STOPPED = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SERVICE_STATUS
+    {
+        public uint dwServiceType;
+        public uint dwCurrentState;
+        public uint dwControlsAccepted;
+        public uint dwWin32ExitCode;
+        public uint dwServiceSpecificExitCode;
+        public uint dwCheckPoint;
+        public uint dwWaitHint;
+    }
+
+    [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    public static partial nint OpenSCManagerW(string? machine, string? database, uint access);
+
+    [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    public static partial nint OpenServiceW(nint manager, string name, uint access);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool QueryServiceStatus(nint service, out SERVICE_STATUS status);
+
+    [LibraryImport("advapi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool CloseServiceHandle(nint handle);
+
+    public const uint REG_NOTIFY_CHANGE_NAME = 0x1;
+    public const uint REG_NOTIFY_CHANGE_LAST_SET = 0x4;
+    public const uint REG_NOTIFY_THREAD_AGNOSTIC = 0x10000000;
+
+    [LibraryImport("advapi32.dll")]
+    public static partial int RegNotifyChangeKeyValue(Microsoft.Win32.SafeHandles.SafeRegistryHandle key,
+        [MarshalAs(UnmanagedType.Bool)] bool watchSubtree, uint filter, Microsoft.Win32.SafeHandles.SafeWaitHandle @event,
+        [MarshalAs(UnmanagedType.Bool)] bool asynchronous);
 }

@@ -42,6 +42,9 @@ public static class Firewall
     /// <summary>Every port but DNS.</summary>
     public const string Ports = "1-52,54-65535";
 
+    /// <summary>Tells when a rule in the local policy store is added, changed, or removed.</summary>
+    public static RegistryWatch Watch() => new(Registry.LocalMachine, Rules, subtree: false);
+
     /// <summary>The rules in the local policy store, where Windows Defender Firewall's own
     /// settings and apps' "Allow access" prompts write. Null if it can't be read.</summary>
     public static List<FirewallRule>? Read()

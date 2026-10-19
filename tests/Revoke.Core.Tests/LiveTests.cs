@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ServiceProcess;
 using Xunit;
 
 namespace Revoke.Core.Tests;
@@ -34,6 +35,52 @@ public class LiveTests(ITestOutputHelper output)
         Assert.True(killed >= 2, $"killed {killed}");
         parent.WaitForExit();
         Assert.DoesNotContain(Processes.List(), p => p.Pid == child.Pid && p.Started == child.Started);
+    }
+
+    /// <summary>The quick look at packages names the same ones the full read finds, or the
+    /// model would read them all every minute, or miss a change.</summary>
+    [Fact]
+    public void NamesThePackagesItReads() =>
+        Assert.True(Packages.FullNames().SetEquals(Packages.Installed().Select(p => p.FullName)));
+
+    /// <summary>Whether each service runs, as the service manager says, and not for one that
+    /// isn't there.</summary>
+    [Fact]
+    public void ReadsWhetherServicesRun()
+    {
+        var all = ServiceController.GetServices();
+        var services = all.Select(s => new Service(s.ServiceName, s.DisplayName, Client.Package("test"), "", 3, false)).ToList();
+        services.Add(new Service($"revoke-test-{Guid.NewGuid():N}", "", Client.Package("test"), "", 3, true));
+        var read = Services.WithStatus(services);
+        Assert.Contains(read, s => s.Name == "RpcSs" && s.Running);
+        Assert.False(read[^1].Running);
+        // A service can start or stop meanwhile, so any that differ are asked about again.
+        var differ = read.SkipLast(1).Where(s => s.Running != Running(s.Name)).ToList();
+        Assert.All(Services.WithStatus(differ), s => Assert.Equal(Running(s.Name), s.Running));
+        foreach (var service in all) service.Dispose();
+
+        static bool Running(string name)
+        {
+            using var controller = new ServiceController(name);
+            return controller.Status != ServiceControllerStatus.Stopped;
+        }
+    }
+
+    /// <summary>The listing says what each process runs and when it started, the second time
+    /// too, when it remembers processes it has seen rather than opening them again.</summary>
+    [Fact]
+    public void ListsProcessesWithTheirProgramsAndStartTimes()
+    {
+        using var me = Process.GetCurrentProcess();
+        foreach (var listed in new[] { Processes.List(), Processes.List() })
+        {
+            var self = listed.Single(p => p.Pid == (uint)me.Id);
+            Assert.Equal(Environment.ProcessPath, self.Path, ignoreCase: true);
+            Assert.Equal(Path.GetFileName(Environment.ProcessPath), self.Name, ignoreCase: true);
+            Assert.Equal(new DateTimeOffset(me.StartTime), Processes.Time(self.Started));
+            Assert.Contains(listed, p => p.Pid == self.Parent);
+            Assert.Contains(listed, p => p.Pid == 4 && p.Name == "System");
+        }
     }
 
     /// <summary>

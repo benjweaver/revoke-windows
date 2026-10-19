@@ -106,18 +106,32 @@ public static class Services
         }
     }
 
-    /// <summary>Whether each service is running. Asking the service manager needs no admin rights.</summary>
-    public static List<Service> WithStatus(IEnumerable<Service> services) =>
-        services.Select(service =>
+    /// <summary>Whether each service is running. Asks the service manager about just these,
+    /// over one connection, which needs no admin rights.</summary>
+    public static List<Service> WithStatus(IEnumerable<Service> services)
+    {
+        var manager = Native.OpenSCManagerW(null, null, Native.SC_MANAGER_CONNECT);
+        try
         {
-            try
-            {
-                using var controller = new ServiceController(service.Name);
-                return service with { Running = controller.Status != ServiceControllerStatus.Stopped };
-            }
-            catch (Exception e) when (e is InvalidOperationException or ArgumentException)
-            {
-                return service with { Running = false };
-            }
-        }).ToList();
+            return services.Select(service => service with { Running = manager != 0 && IsRunning(manager, service.Name) }).ToList();
+        }
+        finally
+        {
+            if (manager != 0) Native.CloseServiceHandle(manager);
+        }
+    }
+
+    static bool IsRunning(nint manager, string name)
+    {
+        var service = Native.OpenServiceW(manager, name, Native.SERVICE_QUERY_STATUS);
+        if (service == 0) return false;
+        try
+        {
+            return Native.QueryServiceStatus(service, out var status) && status.dwCurrentState != Native.SERVICE_STOPPED;
+        }
+        finally
+        {
+            Native.CloseServiceHandle(service);
+        }
+    }
 }

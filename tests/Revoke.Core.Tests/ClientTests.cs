@@ -57,6 +57,18 @@ public class ClientTests
     }
 
     [Fact]
+    public void SortInTheOrderOfTheirKeys()
+    {
+        Client[] clients =
+        [
+            Client.Package("b_1"), Client.FromPath(@"C:\Tools\z.exe"), Client.Package("a_1"),
+            new(ClientKind.Exe, "a"), Client.Package("pkg"), new(ClientKind.Exe, ""), Client.Package(""),
+        ];
+        Assert.Equal(clients.OrderBy(c => c.Key, StringComparer.Ordinal), clients.Order());
+        Assert.True(Client.Package("a").CompareTo(null) > 0);
+    }
+
+    [Fact]
     public void KeysRoundTrip()
     {
         foreach (var client in new[] { Client.Package("A_b"), Client.FromPath(@"c:\x\1.2.3\y.exe") })

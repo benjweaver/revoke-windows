@@ -125,6 +125,16 @@ public sealed class Model
     SortedDictionary<Client, Facts> facts = [];
     List<Proc> procs = [];
     HashSet<uint> windows = [];
+    List<LinkHandler> links = [];
+    List<FirewallRule>? rules;
+    readonly RegistryWatch linkChanges = Links.Watch();
+    readonly RegistryWatch ruleChanges = Firewall.Watch();
+    /// <summary>Revoke changed links itself, so they're read again without waiting for Windows to say.</summary>
+    bool linksWritten;
+    /// <summary>Whether the programs links and firewall rules name exist, and the client each
+    /// program belongs to, until the next minute's read.</summary>
+    readonly Dictionary<string, bool> programsExist = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, Client> clientsByPath = new(StringComparer.Ordinal);
     readonly Dictionary<Client, Watch> watches = [];
     readonly uint self = (uint)Environment.ProcessId;
 
@@ -137,20 +147,29 @@ public sealed class Model
     // Reading
 
     /// <summary>Reads everything again. Packages and services change rarely and are read at
-    /// most once a minute unless forced.</summary>
+    /// most once a minute unless forced, and packages only when one was installed, updated,
+    /// or removed. Links and firewall rules are read when Windows says they changed.</summary>
     public void Refresh(bool force = false)
     {
         if (force || DateTime.UtcNow - packagesRead > TimeSpan.FromMinutes(1))
         {
-            packages = Packages.Installed();
+            if (force || !Packages.FullNames().SetEquals(packages.Select(p => p.FullName))) packages = Packages.Installed();
             services = Services.Read();
+            programsExist.Clear();
+            clientsByPath.Clear();
             packagesRead = DateTime.UtcNow;
         }
         services = Services.WithStatus(services);
         procs = Processes.List();
         windows = Processes.WithWindows();
-        // Read every time, so an app registering its links again is caught within a tick.
-        var links = Links.Read();
+        // Read on any change in Software\Classes, so an app registering its links again is
+        // caught within a tick.
+        if (linkChanges.Changed() || force || linksWritten)
+        {
+            links = Links.Read();
+            linksWritten = false;
+        }
+        if (ruleChanges.Changed() || force) rules = Firewall.Read();
 
         var all = new SortedDictionary<Client, Facts>();
         Facts For(Client client) => all.TryGetValue(client, out var f) ? f : all[client] = new Facts();
@@ -169,7 +188,7 @@ public sealed class Model
             if (proc.Pid == self) continue;
             Client client;
             if (proc.Family is { } family) client = Client.Package(family);
-            else if (proc.Path is { } path && !path.StartsWith(windowsDir, StringComparison.OrdinalIgnoreCase)) client = Client.FromPath(path);
+            else if (proc.Path is { } path && !path.StartsWith(windowsDir, StringComparison.OrdinalIgnoreCase)) client = ClientOf(path);
             else continue;
             var f = For(client);
             if (proc.Path is { } p) f.Programs.Add(p);
@@ -187,10 +206,9 @@ public sealed class Model
         foreach (var handler in links)
         {
             var f = For(handler.Client);
-            if (handler.Program is { } program && File.Exists(program)) f.Programs.Add(program);
+            if (handler.Program is { } program && ProgramExists(program)) f.Programs.Add(program);
             f.Links.Add(handler);
         }
-        var rules = Firewall.Read();
         foreach (var rule in rules ?? [])
         {
             if (rule.RevokeClient is { } client)
@@ -199,8 +217,8 @@ public sealed class Model
             }
             else if (rule.Inbound && rule.Allow && rule.Program is { } program)
             {
-                var f = For(Client.FromPath(program));
-                if (File.Exists(program)) f.Programs.Add(program);
+                var f = For(ClientOf(program));
+                if (ProgramExists(program)) f.Programs.Add(program);
                 f.Inbound.Add(rule);
             }
         }
@@ -229,6 +247,12 @@ public sealed class Model
     }
 
     HashSet<string> blockedPrograms = new(StringComparer.OrdinalIgnoreCase);
+
+    bool ProgramExists(string path) =>
+        programsExist.TryGetValue(path, out var exists) ? exists : programsExist[path] = File.Exists(path);
+
+    Client ClientOf(string path) =>
+        clientsByPath.TryGetValue(path, out var client) ? client : clientsByPath[path] = Client.FromPath(path);
 
     /// <summary>
     /// Agents start helpers of their own (Codex runs node, node_repl and a code-mode
@@ -933,6 +957,7 @@ public sealed class Model
             }
         }
         if (!changed) return null;
+        linksWritten = true;
         Refresh();
         if (retaken.Count == 0) return null;
         var names = retaken.Distinct().ToList();

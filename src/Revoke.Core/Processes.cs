@@ -12,36 +12,69 @@ public sealed record Proc(uint Pid, uint Parent, string Name, string? Path, stri
 /// everything they started.</summary>
 public static unsafe class Processes
 {
-    /// <summary>Every process running now.</summary>
+    static readonly Lock listing = new();
+    static byte[] table = new byte[512 * 1024];
+    /// <summary>Each running process's program and package, by ID and creation time, which
+    /// together tell it apart from a later process that reuses the ID.</summary>
+    static Dictionary<(uint Pid, long Started), (string? Path, string? Family)> described = [];
+
+    /// <summary>
+    /// Every process running now. Windows lists them all in one call, with when each started
+    /// and what started it. Only a process not seen before is opened, to ask for its program
+    /// and package, so listing every couple of seconds costs little.
+    /// </summary>
     public static List<Proc> List()
     {
-        var procs = new List<Proc>();
-        var snapshot = Native.CreateToolhelp32Snapshot(Native.TH32CS_SNAPPROCESS, 0);
-        if (snapshot == -1) return procs;
-        try
+        lock (listing)
         {
-            var entry = new Native.PROCESSENTRY32W { dwSize = (uint)sizeof(Native.PROCESSENTRY32W) };
-            for (var ok = Native.Process32FirstW(snapshot, ref entry); ok; ok = Native.Process32NextW(snapshot, ref entry))
+            var procs = new List<Proc>();
+            var seen = new Dictionary<(uint, long), (string?, string?)>(described.Count);
+            int status;
+            while (true)
             {
-                var name = new string(entry.szExeFile);
-                procs.Add(entry.th32ProcessID == 0
-                    ? new Proc(0, 0, name, null, null, 0)
-                    : Describe(entry.th32ProcessID, entry.th32ParentProcessID, name));
+                uint needed;
+                fixed (byte* start = table)
+                    status = Native.NtQuerySystemInformation(Native.SystemProcessInformation, start, (uint)table.Length, out needed);
+                if (status != Native.STATUS_INFO_LENGTH_MISMATCH) break;
+                // With room for processes that start before the next try.
+                table = new byte[Math.Max((int)needed + 64 * 1024, table.Length * 2)];
             }
+            if (status < 0) return procs;
+            fixed (byte* start = table)
+            {
+                for (var entry = (Native.SYSTEM_PROCESS_INFORMATION*)start; ; entry = (Native.SYSTEM_PROCESS_INFORMATION*)((byte*)entry + entry->NextEntryOffset))
+                {
+                    var pid = (uint)entry->UniqueProcessId;
+                    var parent = (uint)entry->InheritedFromUniqueProcessId;
+                    var started = entry->CreateTime;
+                    if (pid == 0)
+                    {
+                        procs.Add(new Proc(0, 0, "[System Process]", null, null, 0));
+                    }
+                    else
+                    {
+                        var name = new string(entry->ImageName.Buffer, 0, entry->ImageName.Length / sizeof(char));
+                        if (!described.TryGetValue((pid, started), out var found)) found = Describe(pid, started);
+                        seen[(pid, started)] = found;
+                        procs.Add(new Proc(pid, parent, name, found.Path, found.Family, started));
+                    }
+                    if (entry->NextEntryOffset == 0) break;
+                }
+            }
+            described = seen;
+            return procs;
         }
-        finally
-        {
-            Native.CloseHandle(snapshot);
-        }
-        return procs;
     }
 
-    static Proc Describe(uint pid, uint parent, string name)
+    /// <summary>A process's program and package. Nothing, if Windows won't say, or the
+    /// process ended and its ID went to another one since it was listed.</summary>
+    static (string? Path, string? Family) Describe(uint pid, long started)
     {
         var handle = Native.OpenProcess(Native.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-        if (handle == 0) return new Proc(pid, parent, name, null, null, 0);
+        if (handle == 0) return (null, null);
         try
         {
+            if (CreationTime(handle) != started) return (null, null);
             string? path = null, family = null;
             var buffer = stackalloc char[1024];
             uint size = 1024;
@@ -50,7 +83,7 @@ public static unsafe class Processes
             var familyBuffer = stackalloc char[256];
             if (Native.GetPackageFamilyName(handle, ref length, familyBuffer) == 0 && length > 1)
                 family = new string(familyBuffer, 0, (int)length - 1);
-            return new Proc(pid, parent, name, path, family, CreationTime(handle));
+            return (path, family);
         }
         finally
         {

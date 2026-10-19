@@ -26,7 +26,9 @@ public sealed record Client(ClientKind Kind, string Id) : IComparable<Client>
         FamilyFromInstallPath(path) is { } family ? Package(family) : new(ClientKind.Exe, Pattern(path));
 
     /// <summary>How settings and the UI refer to the client.</summary>
-    public string Key => (Kind == ClientKind.Package ? "pkg:" : "exe:") + Id;
+    public string Key => Prefix + Id;
+
+    string Prefix => Kind == ClientKind.Package ? "pkg:" : "exe:";
 
     public string? Family => Kind == ClientKind.Package ? Id : null;
 
@@ -37,7 +39,12 @@ public sealed record Client(ClientKind Kind, string Id) : IComparable<Client>
         : key.StartsWith("exe:", StringComparison.Ordinal) ? new(ClientKind.Exe, key[4..].ToLowerInvariant())
         : null;
 
-    public int CompareTo(Client? other) => string.CompareOrdinal(Key, other?.Key);
+    /// <summary>In the order of <see cref="Key"/>, without building keys: each refresh
+    /// compares clients thousands of times.</summary>
+    public int CompareTo(Client? other) =>
+        other is null ? 1
+        : Kind != other.Kind ? string.CompareOrdinal(Prefix, other.Prefix)
+        : string.CompareOrdinal(Id, other.Id);
 
     public override string ToString() => Key;
 
