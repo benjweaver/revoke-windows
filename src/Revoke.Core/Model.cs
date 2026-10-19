@@ -18,14 +18,14 @@ public enum Pane { Running, Startup, Service, Links, Screen, Camera, Microphone,
 public sealed record Cell(bool On, bool InUse, bool Enabled, bool NeedsAdmin, bool Stale, string Help,
     bool Caution = false, bool? Active = null);
 
-/// <param name="Icon">The app's logo file, for packaged apps.</param>
+/// <param name="Icon">The app's logo files, for packaged apps.</param>
 /// <param name="Deadline">When the time limit will stop it.</param>
 /// <param name="Role">A line under the name for apps whose name alone doesn't say what they are.</param>
 public sealed record Row(
     Client Client,
     string Name,
     string Publisher,
-    string? Icon,
+    AppLogo? Icon,
     bool Watched,
     IReadOnlyDictionary<Pane, Cell> Cells,
     int Processes,
@@ -52,7 +52,7 @@ public sealed record Activity(DateTimeOffset At, string Text, bool IsError)
     public static Activity Now(string text, bool isError = false) => new(DateTimeOffset.Now, text, isError);
 }
 
-public sealed record KnownApp(Client Client, string Name, string Publisher, bool Watched, string? Icon, string? Role = null);
+public sealed record KnownApp(Client Client, string Name, string Publisher, bool Watched, AppLogo? Icon, string? Role = null);
 
 /// <summary>What every source says right now, gathered into one row per app, and
 /// everything that revokes access. Not thread-safe: one caller at a time.</summary>

@@ -5,6 +5,26 @@ All notable changes are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Each release's notes on GitHub come
 from its section below.
 
+## [Unreleased]
+
+### Fixed
+
+- The panel follows a switch between light and dark mode while Revoke runs. The line
+  under each app, the section titles, and the switch markers kept the colors of the
+  mode Revoke started in, so after switching to light they were nearly white on white.
+- ChatGPT's logo shows in light mode. Revoke used each app's Store logo, which for
+  ChatGPT is white, drawn for its blue tile. It now uses the logos the taskbar shows,
+  with the version drawn for light backgrounds in light mode.
+- The gray text in the panel, the line under each app, the section titles, and the
+  footnote, is darker in light mode, at least 4.5:1 against the card. It measured
+  about 3.3:1.
+- Opening the panel with a click no longer puts a keyboard focus ring on the Settings
+  button. Opening it from the keyboard still does.
+- Updating the admin helper no longer fails with "The process cannot access the file"
+  while the old helper's process, or a virus scanner, still holds its file. Windows won't
+  overwrite a file in use but lets it be renamed, so the old file now moves aside and is
+  deleted once it's free, at the next restart at the latest.
+
 ## [0.3.1] - 2026-10-10
 
 ### Changed

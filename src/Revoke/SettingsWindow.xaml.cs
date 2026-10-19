@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Revoke.Core;
 using Windows.Graphics;
@@ -32,8 +31,18 @@ public sealed partial class SettingsWindow : Window
         }
         controller.Changed += Render;
         Closed += (_, _) => controller.Changed -= Render;
+        // Logos have a file for light backgrounds and one for dark, so the cards are made again.
+        ((FrameworkElement)Content).ActualThemeChanged += (_, _) =>
+        {
+            appCards.Clear();
+            appOrder = [];
+            hiddenOrder = [];
+            Render(controller.View);
+        };
         Render(controller.View);
     }
+
+    bool OnLight => ((FrameworkElement)Content).ActualTheme == ElementTheme.Light;
 
     void Render(View view)
     {
@@ -55,8 +64,7 @@ public sealed partial class SettingsWindow : Window
             (true, true, false) => "A newer helper came with this version of Revoke. Updating it asks for admin once.",
             _ => "Makes firewall and service changes without a UAC prompt each time. It's a small Windows service only your account can use, and installing it asks for admin once.",
         };
-        HelperStatus.Foreground = (Brush)Application.Current.Resources[view.HelperInstalled && !view.HelperRunning
-            ? "SystemFillColorCriticalBrush" : "TextFillColorSecondaryBrush"];
+        HelperStatus.Style = FindStyle(view.HelperInstalled && !view.HelperRunning ? "HintError" : "Hint");
         HelperButton.Content = (view.HelperInstalled, view.HelperRunning, view.HelperCurrent) switch
         {
             (true, false, _) => "Start",
@@ -116,14 +124,14 @@ public sealed partial class SettingsWindow : Window
         return card;
     }
 
-    static FrameworkElement AppIcon(KnownApp app)
+    FrameworkElement AppIcon(KnownApp app)
     {
-        FrameworkElement icon = app.Icon is { } path
-            ? new Image { Source = new BitmapImage(new Uri(path)) { DecodePixelWidth = 48 }, Width = 24, Height = 24 }
+        FrameworkElement icon = app.Icon is { } logo
+            ? new Image { Source = new BitmapImage(new Uri(logo.For(OnLight))) { DecodePixelWidth = 48 }, Width = 24, Height = 24 }
             : new Border
             {
                 Width = 24, Height = 24, CornerRadius = new CornerRadius(4),
-                Background = (Brush)Application.Current.Resources["ControlFillColorSecondaryBrush"],
+                Style = FindStyle("Glyph"),
                 Child = new TextBlock
                 {
                     Text = app.Name[..1].ToUpperInvariant(), FontSize = 12,

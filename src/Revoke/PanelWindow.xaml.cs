@@ -66,14 +66,21 @@ public sealed partial class PanelWindow : Window
             Hide();
         };
         controller.Changed += Render;
+        // Logos have a file for light backgrounds and one for dark; styles take care of the rest.
+        Root.ActualThemeChanged += (_, _) => Render(controller.View);
         Render(controller.View);
     }
 
     public bool IsShown => AppWindow.IsVisible;
 
+    bool OnLight => Root.ActualTheme == ElementTheme.Light;
+
+    /// <summary>A style from the panel's resources, whose theme resources follow light and dark.</summary>
+    Style Find(string key) => (Style)Root.Resources[key];
+
     /// <summary>Shows the panel above the tray icon, or hides it if it's showing. A click on
     /// the icon hides the panel by taking focus away first, so that click doesn't reopen it.</summary>
-    internal void Toggle(TrayIcon.RECT iconRect)
+    internal void Toggle(TrayIcon.RECT iconRect, bool keyboard)
     {
         if (IsShown)
         {
@@ -86,6 +93,10 @@ public sealed partial class PanelWindow : Window
         AppWindow.Show();
         Activate();
         TrayIcon.SetForegroundWindow(Microsoft.UI.Win32Interop.GetWindowFromWindowId(AppWindow.Id));
+        // The first control takes focus either way, so Tab and the arrow keys start from it,
+        // but its focus ring is for the keyboard: opened with a click, it would sit on the
+        // Settings button as if something had been chosen.
+        SettingsButton.Focus(keyboard ? FocusState.Keyboard : FocusState.Pointer);
         // Apps may have started or quit since the last tick.
         _ = controller.RefreshAsync();
     }
@@ -170,8 +181,7 @@ public sealed partial class PanelWindow : Window
         RevokeAll.IsEnabled = EndAll.IsEnabled = !view.Busy;
         Spinner.IsActive = view.Busy;
         Activity.Text = view.Activity is { Text.Length: > 0 } a ? $"{a.At:t} · {a.Text}" : "";
-        Activity.Foreground = (Brush)Application.Current.Resources[view.Activity?.IsError == true
-            ? "SystemFillColorCriticalBrush" : "TextFillColorSecondaryBrush"];
+        Activity.Style = Find(view.Activity?.IsError == true ? "ActivityError" : "Activity");
         SetTip(Activity, Activity.Text);
         Footnote.Text = "Switching camera, microphone, location, or screen capture on opens Settings, because only you can grant access there."
             + (view.HelperInstalled ? "" : " Services and firewall rules ask for admin, unless you install the helper in Settings.");
@@ -208,7 +218,7 @@ public sealed partial class PanelWindow : Window
                     {
                         Text = "No watched apps are installed or running.",
                         Margin = new Thickness(8, 4, 8, 4),
-                        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                        Style = Find("SecondaryText"),
                     },
                     _ => rows[Client.FromKey(key)!].Root,
                 });
@@ -218,15 +228,13 @@ public sealed partial class PanelWindow : Window
         if (IsShown) Place();
     }
 
-    static TextBlock SectionTitle(string text, string? tip = null)
+    TextBlock SectionTitle(string text, string? tip = null)
     {
         var title = new TextBlock
         {
             Text = text,
             Margin = new Thickness(8, 8, 8, 4),
-            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+            Style = Find("SectionTitle"),
         };
         SetTip(title, tip);
         return title;
@@ -388,11 +396,9 @@ public sealed partial class PanelWindow : Window
         public RowView(PanelWindow panel, Client client)
         {
             this.panel = panel;
-            var resources = Application.Current.Resources;
-            Root.Background = (Brush)resources["CardBackgroundFillColorDefaultBrush"];
-            Root.BorderBrush = (Brush)resources["CardStrokeColorDefaultBrush"];
-            detail.Foreground = (Brush)resources["TextFillColorTertiaryBrush"];
-            glyph.Background = (Brush)resources["ControlFillColorSecondaryBrush"];
+            Root.Style = panel.Find("RowCard");
+            detail.Style = panel.Find("SecondaryText");
+            glyph.Style = panel.Find("RowGlyph");
             glyph.Child = letter;
             AddColumns(Root);
 
@@ -425,7 +431,7 @@ public sealed partial class PanelWindow : Window
             {
                 var pane = Panes[i].Pane;
                 // Named for its column ("Running for Claude"); the explanation is the help text.
-                var cell = new CellView(Model.Title(pane));
+                var cell = new CellView(panel, Model.Title(pane));
                 cell.Switch.Toggled += (_, _) => panel.Switch_Toggled(client, pane, cell.Switch);
                 Grid.SetColumn(cell.Root, i + 1);
                 Root.Children.Add(cell.Root);
@@ -439,7 +445,7 @@ public sealed partial class PanelWindow : Window
             watch.Visibility = hide.Visibility = row.Watched ? Visibility.Collapsed : Visibility.Visible;
             unwatch.Visibility = row.Watched ? Visibility.Visible : Visibility.Collapsed;
             letter.Text = row.Name[..1].ToUpperInvariant();
-            icon.Source = panel.Image(row.Icon);
+            icon.Source = panel.Image(row.Icon?.For(panel.OnLight));
             glyph.Visibility = row.Icon is null ? Visibility.Visible : Visibility.Collapsed;
             detail.Text = Detail(row);
             endTask.Visibility = row.IsOn(Pane.Running) ? Visibility.Visible : Visibility.Collapsed;
@@ -496,7 +502,6 @@ public sealed partial class PanelWindow : Window
             Glyph = "\uE7BA", FontSize = 11,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, 0, 2, 0),
-            Foreground = (Brush)Application.Current.Resources["SystemFillColorCautionBrush"],
         };
         // Whether a service is running right now, whatever its switch says it may do:
         // filled green while it runs, a gray ring while it's stopped.
@@ -509,10 +514,12 @@ public sealed partial class PanelWindow : Window
         };
         readonly string column;
 
-        public CellView(string column)
+        public CellView(PanelWindow panel, string column)
         {
             this.column = column;
-            dash.Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+            dash.Style = panel.Find("Dash");
+            stale.Style = panel.Find("Caution");
+            state.Style = panel.Find("StoppedRing");
             Root.Children.Add(Switch);
             Root.Children.Add(dash);
             Root.Children.Add(live);
@@ -534,7 +541,8 @@ public sealed partial class PanelWindow : Window
             else
             {
                 state.Fill = null;
-                state.Stroke = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+                // Back to the style's ring, which follows light and dark.
+                state.ClearValue(Shape.StrokeProperty);
             }
             stale.Visibility = cell.Stale || cell.Caution ? Visibility.Visible : Visibility.Collapsed;
             if (Switch.IsOn != cell.On) Switch.IsOn = cell.On;

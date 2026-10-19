@@ -23,6 +23,13 @@
           <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
           <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        <Style x:Key="HintError" TargetType="TextBlock" BasedOn="{StaticResource Hint}">
+          <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+        </Style>
+        <!-- The letter shown for an app without a logo. -->
+        <Style x:Key="Glyph" TargetType="Border">
+          <Setter Property="Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
+        </Style>
         <Style x:Key="Footer" TargetType="TextBlock" BasedOn="{StaticResource Hint}">
           <Setter Property="Margin" Value="2,6,2,0" />
         </Style>

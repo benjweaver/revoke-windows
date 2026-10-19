@@ -213,9 +213,8 @@ static partial class Installer
         try
         {
             StopIfRunning();
-            // The copy keeps the file's modified time, which is how Revoke tells it's current.
             Directory.CreateDirectory(Path.GetDirectoryName(Helper.InstallPath)!);
-            File.Copy(Environment.ProcessPath!, Helper.InstallPath, overwrite: true);
+            ReplaceInstalledFile();
 
             var binary = $"\"{Helper.InstallPath}\" --user {user.Value}";
             var manager = Check(OpenSCManagerW(null, null, 0x2)); // SC_MANAGER_CREATE_SERVICE
@@ -303,6 +302,35 @@ static partial class Installer
         return failures;
     }
 
+    /// <summary>
+    /// Copies this helper over the installed one, keeping the file's modified time, which is
+    /// how Revoke tells it's current. The old service's process can hold its file for a while
+    /// after stopping, and so can a virus scanner, and Windows won't overwrite a file in use
+    /// ("being used by another process"), though it lets one be renamed. So the old file moves
+    /// aside first, and is deleted now if it's free, or when Windows next starts.
+    /// </summary>
+    static void ReplaceInstalledFile()
+    {
+        var installed = Helper.InstallPath;
+        foreach (var leftover in Directory.EnumerateFiles(Path.GetDirectoryName(installed)!, "*.old")) Delete(leftover);
+        if (File.Exists(installed))
+        {
+            var old = $"{installed}.{Guid.NewGuid():N}.old";
+            File.Move(installed, old);
+            Delete(old);
+        }
+        File.Copy(Environment.ProcessPath!, installed);
+    }
+
+    static void Delete(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            MoveFileExW(path, null, 0x4); // MOVEFILE_DELAY_UNTIL_REBOOT
+        }
+    }
+
     static void StopIfRunning()
     {
         try
@@ -342,4 +370,8 @@ static partial class Installer
     [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool DeleteService(nint service);
+
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool MoveFileExW(string existing, string? replacement, uint flags);
 }
