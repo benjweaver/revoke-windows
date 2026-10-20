@@ -88,3 +88,4 @@ finally {
 }
 Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Released $tag"
+Write-Host "On the Mac, run scripts/screenshots.sh to retake the README screenshots from $tag, then commit docs/screenshots."
