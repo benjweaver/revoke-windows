@@ -184,7 +184,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-ssh_up() { ssh -o ConnectTimeout=5 win11 true >/dev/null 2>&1 }
+ssh_up() { ssh -o ConnectTimeout=5 win11 'exit 0' >/dev/null 2>&1 }
 desktop_up() { desk 'echo up' >/dev/null 2>&1 }
 
 # wait_for SECONDS FUNCTION: polls FUNCTION every 5 seconds until it succeeds.
@@ -199,8 +199,8 @@ wait_for() {
 }
 
 say "checking the VM"
-status=$("$utmctl" status "$vm")
-if [[ $status != started ]]; then
+vm_state=$("$utmctl" status "$vm")
+if [[ $vm_state != started ]]; then
 	say "starting $vm with --disposable"
 	started_vm=1
 	"$utmctl" start --disposable "$vm"
