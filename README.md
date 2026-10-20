@@ -300,6 +300,10 @@ app, zips it with a `SHA256SUMS` file, and publishes a GitHub release with that
 changelog section as its notes, which the install script then finds. It needs the
 GitHub CLI, signed in.
 
+After a release, `scripts/screenshots.sh` on the Mac retakes the README's screenshots
+from the latest release, in the Windows 11 VM. Commit the changed `docs/screenshots`
+afterward.
+
 ## License
 
 GPL-3.0-or-later.
