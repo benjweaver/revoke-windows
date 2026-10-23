@@ -29,7 +29,7 @@ public sealed partial class PanelWindow : Window
         (Pane.Startup, "\uE7E8", "Startup", "Opens when you sign in, as in Task Manager's Startup apps"),
         (Pane.Service, "\uE90F", "Service", "A Windows service the app installed, running or starting with Windows"),
         (Pane.Links, "\uE71B", "Links", "Links and files that open the app, from web pages, documents, and other apps. Off, Revoke asks you first"),
-        (Pane.Screen, "\uE7F4", "Screen", "Screen capture (Settings â€º Privacy & security â€º Screenshots and apps)"),
+        (Pane.Screen, "\uE7F4", "Screen", "Screen capture (Settings › Privacy & security › Screenshots and apps)"),
         (Pane.Camera, "\uE714", "Camera", "Camera"),
         (Pane.Microphone, "\uE720", "Mic", "Microphone"),
         (Pane.Location, "\uE707", "Location", "Location"),
@@ -187,7 +187,7 @@ public sealed partial class PanelWindow : Window
         }
         RevokeAll.IsEnabled = EndAll.IsEnabled = !view.Busy;
         Spinner.IsActive = view.Busy;
-        Activity.Text = view.Activity is { Text.Length: > 0 } a ? $"{a.At:t} Â· {a.Text}" : "";
+        Activity.Text = view.Activity is { Text.Length: > 0 } a ? $"{a.At:t} · {a.Text}" : "";
         Activity.Style = Find(view.Activity?.IsError == true ? "ActivityError" : "Activity");
         SetTip(Activity, Activity.Text);
         Footnote.Text = "Switching camera, microphone, location, or screen capture on opens Settings, because only you can grant access there."
@@ -281,20 +281,44 @@ public sealed partial class PanelWindow : Window
             Width = 16,
             Height = 14,
             HorizontalAlignment = HorizontalAlignment.Center,
-            Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlReader.Load(
-                "<PathGeometry xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' Figures='"
-                + "M3,0 H13 A3,3 0 0 1 13,6 H3 A3,3 0 0 1 3,0 Z "
-                + "M3,1 A2,2 0 0 0 3,5 H13 A2,2 0 0 0 13,1 Z "
-                + "M3,8 H13 A3,3 0 0 1 13,14 H3 A3,3 0 0 1 3,8 Z "
-                + "M3,9 A2,2 0 0 0 3,13 H13 A2,2 0 0 0 13,9 Z "
-                + "M5,3 A1.5,1.5 0 1 1 2,3 A1.5,1.5 0 1 1 5,3 Z "
-                + "M14,11 A1.5,1.5 0 1 1 11,11 A1.5,1.5 0 1 1 14,11 Z' />"),
+            Data = new GeometryGroup
+            {
+                Children =
+                {
+                    SwitchOutline(0), SwitchOutline(8),
+                    new EllipseGeometry { Center = new Windows.Foundation.Point(3.5, 3), RadiusX = 1.5, RadiusY = 1.5 },
+                    new EllipseGeometry { Center = new Windows.Foundation.Point(12.5, 11), RadiusX = 1.5, RadiusY = 1.5 },
+                },
+            },
         };
         accessTitle.Children.Add(switches);
         accessTitle.Children.Add(new TextBlock { Text = "All Access", FontSize = 11 });
         SetTip(accessTitle, AllAccessTip);
         Grid.SetColumn(accessTitle, PanelGrid.ColumnCount);
         Columns.Children.Add(accessTitle);
+    }
+
+    static PathGeometry SwitchOutline(double top)
+    {
+        PathFigure Capsule(double inset)
+        {
+            var radius = 3 - inset;
+            var y = top + inset;
+            var bottom = top + 6 - inset;
+            return new PathFigure
+            {
+                StartPoint = new Windows.Foundation.Point(3, y),
+                IsClosed = true,
+                Segments =
+                {
+                    new LineSegment { Point = new Windows.Foundation.Point(13, y) },
+                    new ArcSegment { Point = new Windows.Foundation.Point(13, bottom), Size = new Windows.Foundation.Size(radius, radius), SweepDirection = SweepDirection.Clockwise },
+                    new LineSegment { Point = new Windows.Foundation.Point(3, bottom) },
+                    new ArcSegment { Point = new Windows.Foundation.Point(3, y), Size = new Windows.Foundation.Size(radius, radius), SweepDirection = SweepDirection.Clockwise },
+                },
+            };
+        }
+        return new PathGeometry { FillRule = FillRule.EvenOdd, Figures = { Capsule(0), Capsule(1) } };
     }
 
     static Cell AccessCell(bool on) => new(on, false, true, false, false, AllAccessTip);
@@ -439,7 +463,7 @@ public sealed partial class PanelWindow : Window
             content.Children.Add(new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
-                Text = string.Join("\n", services.Select(s => $"â€¢ {s.Service} ({s.App})")),
+                Text = string.Join("\n", services.Select(s => $"• {s.Service} ({s.App})")),
             });
         }
         var dontAsk = new CheckBox { Content = "Don't ask again" };
@@ -558,7 +582,7 @@ public sealed partial class PanelWindow : Window
         }
 
         /// <summary>What the app is, when its name doesn't say, then how it's running.</summary>
-        static string Detail(Row row) => row.Role is { } role ? $"{role} Â· {Status(row)}" : Status(row);
+        static string Detail(Row row) => row.Role is { } role ? $"{role} · {Status(row)}" : Status(row);
 
         static string Status(Row row)
         {
@@ -590,7 +614,7 @@ public sealed partial class PanelWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        readonly TextBlock dash = new() { Text = "â€“", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        readonly TextBlock dash = new() { Text = "–", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         // Using it right now: camera, microphone, location, or screen capture.
         readonly Ellipse live = new()
         {
