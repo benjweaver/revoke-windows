@@ -274,9 +274,22 @@ public sealed partial class PanelWindow : Window
             Columns.Children.Add(stack);
         }
         var accessTitle = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Spacing = 2, Opacity = 0.7 };
-        var switches = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
-        switches.Children.Add(new FontIcon { Glyph = "\uF19E", FontSize = 12 });
-        switches.Children.Add(new FontIcon { Glyph = "\uF19E", FontSize = 12 });
+        // A single 16 × 14 icon: two stacked switches, with opposing knobs.
+        // PathIcon inherits the same foreground and theme behavior as the other icons.
+        var switches = new PathIcon
+        {
+            Width = 16,
+            Height = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlReader.Load(
+                "<PathGeometry xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' Figures='"
+                + "M3,0 H13 A3,3 0 0 1 13,6 H3 A3,3 0 0 1 3,0 Z "
+                + "M3,1 A2,2 0 0 0 3,5 H13 A2,2 0 0 0 13,1 Z "
+                + "M3,8 H13 A3,3 0 0 1 13,14 H3 A3,3 0 0 1 3,8 Z "
+                + "M3,9 A2,2 0 0 0 3,13 H13 A2,2 0 0 0 13,9 Z "
+                + "M5,3 A1.5,1.5 0 1 1 2,3 A1.5,1.5 0 1 1 5,3 Z "
+                + "M14,11 A1.5,1.5 0 1 1 11,11 A1.5,1.5 0 1 1 14,11 Z' />"),
+        };
         accessTitle.Children.Add(switches);
         accessTitle.Children.Add(new TextBlock { Text = "All Access", FontSize = 11 });
         SetTip(accessTitle, AllAccessTip);
