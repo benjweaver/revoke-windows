@@ -42,7 +42,17 @@ The tray lock is open while any watched app is running or can capture the screen
 | Camera, Mic, Location | It's allowed to use them | Denies it. A red dot means it's using one right now |
 | Network | Devices on your network can connect to it, or it can reach them | Switches off its inbound firewall rules and blocks it from your local network (asks for admin) |
 
-Switching Running on opens the app. Switching a privacy column back on opens Settings,
+The WATCHED header has a switch for each column. It is on if any watched app has
+that switch on; switching it off applies to every watched app. Switching it back on
+restores directly controllable access, or opens Windows Settings for privacy access.
+The Running header only stops apps; clicking it while off never launches them.
+
+**All Access**, at the right of each row, switches off every revocable access switch
+for that app while leaving Running untouched. Its WATCHED header switch does the same
+for every watched app. It is on if any revocable access is on; clicking it while off
+does nothing. Service revocation still asks for confirmation when configured.
+
+Switching Running on in an app row opens the app. Switching a privacy column back on opens Settings,
 where only you can grant access.
 
 Apps install services because they need them: Claude's Cowork features run in
@@ -81,7 +91,9 @@ It can also act automatically, if you turn these on in Settings:
 
 - **when an app's last window closes** (on unless you switch it off). Claude and ChatGPT
   keep running in the notification area after you close their windows. This stops them
-  instead, and also stops anything they started that's still running after they quit.
+  instead, and also stops their services and anything they started that's still running
+  after they quit. Services remain allowed to start again when the app needs them;
+  stopping services that require admin rights uses the installed admin helper.
 - **when a watched app quits.** Every watched app from the same developer has its links,
   startup, and privacy switches turned off once none of them has a window open, so
   quitting ChatGPT also covers Codex Computer Use. Programs still running, like Claude
@@ -90,8 +102,8 @@ It can also act automatically, if you turn these on in Settings:
 - **when you lock the PC or it sleeps.**
 
 Automatic stops also switch Links off, so nothing can open an app that was stopped
-behind your back. They leave services and firewall rules alone, so an admin prompt never
-appears out of nowhere.
+behind your back. They leave service startup settings and firewall rules alone, and use
+the installed helper for service stops that need admin rights, without a UAC prompt.
 
 Everything Revoke does is logged, in `%LOCALAPPDATA%\Revoke\Revoke.log`: each change,
 each automatic stop, and each link it stood in for, with what you answered.

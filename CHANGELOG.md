@@ -7,6 +7,16 @@ from its section below.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-23
+
+### Added
+
+- Column switches in the WATCHED header revoke a column for every watched app.
+  Switching back on restores access or opens Windows Settings; Running never launches
+  apps in bulk.
+- All Access switches for each app and all watched apps revoke access while leaving
+  Running untouched. Clicking an already off switch does nothing.
+
 ### Changed
 
 - Revoke uses about a third of the CPU it did while it waits in the tray. In a Windows 11
@@ -34,6 +44,12 @@ from its section below.
   while the old helper's process, or a virus scanner, still holds its file. Windows won't
   overwrite a file in use but lets it be renamed, so the old file now moves aside and is
   deleted once it's free, at the next restart at the latest.
+- Closing a watched app's last window also stops its services through the installed
+  admin helper when needed, including when the app exits completely. Services can
+  start again when the app needs them without switching Service off in Revoke.
+- Restoring network access tolerates inbound firewall rules removed by an app update.
+- Panel sizing now reserves room for every switch column and the app name.
+
 
 ## [0.3.1] - 2026-10-10
 

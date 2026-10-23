@@ -16,8 +16,12 @@ namespace Revoke;
 /// <summary>The panel above the tray icon: one switch per app and column.</summary>
 public sealed partial class PanelWindow : Window
 {
-    const double PanelWidth = 772;
-    const double ColumnWidth = 52;
+    static double PanelWidth => PanelGrid.MinimumWidth;
+    const double ColumnWidth = PanelGrid.ColumnWidth;
+    const string AllAccessTip = "Switch off every access switch for this app, leaving Running as it is. When all access is off, clicking does nothing.";
+    readonly Dictionary<Pane, CellView> columnCells = [];
+    readonly CellView allWatchedAccess;
+    Grid watchedHeader = null!;
 
     static readonly (Pane Pane, string Glyph, string Short, string Tip)[] Panes =
     [
@@ -44,7 +48,10 @@ public sealed partial class PanelWindow : Window
     {
         this.controller = controller;
         InitializeComponent();
+        Root.Width = Root.MinWidth = PanelWidth;
+        allWatchedAccess = new CellView(this, "All Access");
         BuildColumnTitles();
+        BuildWatchedHeader();
 
         var presenter = OverlappedPresenter.Create();
         presenter.IsMaximizable = false;
@@ -210,8 +217,7 @@ public sealed partial class PanelWindow : Window
             {
                 List.Children.Add(key switch
                 {
-                    "#watched" => SectionTitle("Watched",
-                        "Apps Revoke looks after: Revoke all watched and the automatic options cover them. Right-click one to end it or stop watching it, or choose in Settings."),
+                    "#watched" => watchedHeader,
                     "#others" => SectionTitle("Other apps that can capture the screen",
                         "Apps you don't watch that Windows lets capture the screen. Revoke lists them but never revokes them by itself. Right-click one to watch it or hide it."),
                     "#none" => new TextBlock
@@ -224,6 +230,18 @@ public sealed partial class PanelWindow : Window
                 });
             }
         }
+        watchedHeader.Visibility = Visibility.Visible;
+        foreach (var (pane, cell) in columnCells)
+        {
+            cell.Root.Visibility = snapshot.Watched.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            cell.Update(new Cell(snapshot.Watched.Any(r => r.IsOn(pane)), false, true, false, false,
+                pane == Pane.Running ? "Stop all watched apps. When none are running, clicking does nothing."
+                : $"Switch {Model.Title(pane).ToLowerInvariant()} for all watched apps. Privacy access opens Windows Settings when switched on."),
+                "watched apps", view.Busy, false);
+        }
+        allWatchedAccess.Root.Visibility = snapshot.Watched.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        allWatchedAccess.Update(AccessCell(snapshot.Watched.Any(PanelGrid.AllAccessOn)) with
+            { Help = "Switch off every access switch for all watched apps, leaving Running as it is. When all access is off, clicking does nothing." }, "watched apps", view.Busy, false);
         updating = false;
         if (IsShown) Place();
     }
@@ -242,6 +260,7 @@ public sealed partial class PanelWindow : Window
 
     void BuildColumnTitles()
     {
+        Columns.BorderThickness = new Thickness(1, 0, 1, 0);
         AddColumns(Columns);
         for (var i = 0; i < Panes.Length; i++)
         {
@@ -254,12 +273,77 @@ public sealed partial class PanelWindow : Window
             stack.Opacity = 0.7;
             Columns.Children.Add(stack);
         }
+        var accessTitle = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Spacing = 2, Opacity = 0.7 };
+        var switches = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        switches.Children.Add(new FontIcon { Glyph = "\uF19E", FontSize = 12 });
+        switches.Children.Add(new FontIcon { Glyph = "\uF19E", FontSize = 12 });
+        accessTitle.Children.Add(switches);
+        accessTitle.Children.Add(new TextBlock { Text = "All Access", FontSize = 11 });
+        SetTip(accessTitle, AllAccessTip);
+        Grid.SetColumn(accessTitle, PanelGrid.ColumnCount);
+        Columns.Children.Add(accessTitle);
+    }
+
+    static Cell AccessCell(bool on) => new(on, false, true, false, false, AllAccessTip);
+
+    void BuildWatchedHeader()
+    {
+        // Match row borders and padding so every switch shares the same center.
+        watchedHeader = new Grid { Padding = new Thickness(8, 6, 8, 6), BorderThickness = new Thickness(1) };
+        AddColumns(watchedHeader);
+        watchedHeader.Children.Add(SectionTitle("WATCHED", "Column switches apply to every watched app."));
+        for (var i = 0; i < Panes.Length; i++)
+        {
+            var pane = Panes[i].Pane;
+            var cell = new CellView(this, Model.Title(pane));
+            cell.Switch.Toggled += (_, _) => AggregateToggled(pane, cell.Switch, null);
+            Grid.SetColumn(cell.Root, i + 1);
+            watchedHeader.Children.Add(cell.Root);
+            columnCells[pane] = cell;
+        }
+        allWatchedAccess.Switch.Toggled += (_, _) => AggregateToggled(null, allWatchedAccess.Switch, null);
+        Grid.SetColumn(allWatchedAccess.Root, PanelGrid.ColumnCount);
+        watchedHeader.Children.Add(allWatchedAccess.Root);
+    }
+
+    async void AggregateToggled(Pane? pane, ToggleSwitch toggle, Client? client)
+    {
+        if (updating) return;
+        var on = toggle.IsOn;
+        if (on && (pane is null || pane == Pane.Running))
+        {
+            updating = true;
+            toggle.IsOn = false;
+            updating = false;
+            return;
+        }
+        var targets = (client is null ? controller.View.Snapshot.Watched
+            : controller.View.Snapshot.AllRows.Where(r => r.Client == client)).ToList();
+        if (!on && (pane is null || pane == Pane.Service) && !await ConfirmStoppingServices(targets))
+        {
+            Render(controller.View);
+            return;
+        }
+        await controller.ActAsync(m =>
+        {
+            if (!on) return m.Revoke(targets.Select(r => r.Client).ToList(),
+                pane is { } p ? [p] : PanelGrid.AccessPanes, null, allowAdmin: true);
+            else
+            {
+                // Open a privacy settings page once, even for several watched apps.
+                var eligible = targets.Where(r => r.Cells.TryGetValue(pane!.Value, out var c) && c.Enabled).ToList();
+                if (pane is Pane.Screen or Pane.Camera or Pane.Microphone or Pane.Location)
+                    eligible = targets.Take(1).ToList();
+                var results = eligible.Select(row => m.Set(row.Client, pane!.Value, true)).ToList();
+                return Revoke.Core.Activity.Now(string.Join("; ", results.Select(r => r.Text)), results.Any(r => r.IsError));
+            }
+        });
     }
 
     static void AddColumns(Grid grid)
     {
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        foreach (var _ in Panes) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ColumnWidth) });
+        for (var i = 0; i < PanelGrid.ColumnCount; i++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ColumnWidth) });
     }
 
     ImageSource? Image(string? path)
@@ -388,6 +472,7 @@ public sealed partial class PanelWindow : Window
         // Like Task Manager's: for an app, or a helper it left behind, running with no window to close.
         readonly MenuFlyoutItem endTask = new() { Text = "End task", Icon = new FontIcon { Glyph = "\uE71A" } };
         readonly Dictionary<Pane, CellView> cells = [];
+        readonly CellView allAccess;
         readonly PanelWindow panel;
         readonly MenuFlyoutItem watch = new() { Text = "Watch", Icon = new FontIcon { Glyph = "\uE7B3" } };
         readonly MenuFlyoutItem hide = new() { Text = "Hide from this list", Icon = new FontIcon { Glyph = "\uED1A" } };
@@ -396,6 +481,7 @@ public sealed partial class PanelWindow : Window
         public RowView(PanelWindow panel, Client client)
         {
             this.panel = panel;
+            allAccess = new CellView(panel, "All Access");
             Root.Style = panel.Find("RowCard");
             detail.Style = panel.Find("SecondaryText");
             glyph.Style = panel.Find("RowGlyph");
@@ -437,6 +523,9 @@ public sealed partial class PanelWindow : Window
                 Root.Children.Add(cell.Root);
                 cells[pane] = cell;
             }
+            allAccess.Switch.Toggled += (_, _) => panel.AggregateToggled(null, allAccess.Switch, client);
+            Grid.SetColumn(allAccess.Root, PanelGrid.ColumnCount);
+            Root.Children.Add(allAccess.Root);
         }
 
         public void Update(Row row, bool busy, bool askForAdmin)
@@ -452,6 +541,7 @@ public sealed partial class PanelWindow : Window
             endTask.IsEnabled = !busy;
             SetTip(detail, row.Helpers.Count > 0 ? "Helpers: " + Model.List(row.Helpers) : null);
             foreach (var (pane, cell) in cells) cell.Update(row.Cells[pane], row.Name, busy, askForAdmin);
+            allAccess.Update(AccessCell(PanelGrid.AllAccessOn(row)), row.Name, busy, askForAdmin);
         }
 
         /// <summary>What the app is, when its name doesn't say, then how it's running.</summary>
