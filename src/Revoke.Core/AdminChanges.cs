@@ -134,7 +134,10 @@ public static partial class AdminChanges
                 rule.InvokeMethod(enabled ? "Enable" : "Disable", null, null)?.Dispose();
             }
         }
-        if (!found) throw new InvalidOperationException("the rule is gone");
+        // Windows can remove an app's inbound rules during an update. Restoring a
+        // deleted rule is already complete; don't recreate it or leave saved IDs
+        // stuck forever. A missing rule while revoking still signals a failure.
+        if (!found && !enabled) throw new InvalidOperationException("the rule is gone");
     }
 
     /// <summary>A value for a single-quoted WQL string.</summary>

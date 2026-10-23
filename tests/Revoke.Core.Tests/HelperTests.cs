@@ -44,6 +44,26 @@ public class HelperTests
     }
 
     [Fact]
+    public void RestoresDeletedRulesOnlyWhenItPreviouslyDisabledThem()
+    {
+        Assert.NotNull(Policy().Check(new ElevatedOp.SetRuleEnabled("{missing}", true)));
+        var state = new HelperState { DisabledRules = ["{missing}"] };
+        Assert.Null(Policy(state).Check(new ElevatedOp.SetRuleEnabled("{missing}", true)));
+        Assert.NotNull(Policy(state).Check(new ElevatedOp.SetRuleEnabled("{missing}", false)));
+    }
+
+    [Fact]
+    public void DeletedRuleRestorationSucceedsWithoutRecreatingIt()
+    {
+        // A fresh ID cannot name an existing rule. These calls only query the
+        // provider, so the regression check changes no firewall settings.
+        var id = Guid.NewGuid().ToString("B");
+        Assert.Empty(AdminChanges.Apply([new ElevatedOp.SetRuleEnabled(id, true)]));
+        var failure = Assert.Single(AdminChanges.Apply([new ElevatedOp.SetRuleEnabled(id, false)]));
+        Assert.Contains("the rule is gone", failure);
+    }
+
+    [Fact]
     public void BlocksOnlyProgramsThatExist()
     {
         var notepad = Path.Combine(Environment.SystemDirectory, "notepad.exe");

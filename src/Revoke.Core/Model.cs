@@ -89,10 +89,27 @@ public sealed class Model
     }
 
     /// <summary>Per-client memory between ticks, for the automatic revocations.</summary>
-    sealed class Watch
+    internal sealed class Watch
     {
-        public bool HadWindow;
-        public int WindowlessTicks;
+        bool hadWindow;
+        int windowlessTicks;
+
+        /// <summary>Reports a close once, including a complete exit. Two ticks without a
+        /// window avoid stopping an app while it replaces a window.</summary>
+        internal bool Closed(bool running, bool hasWindow)
+        {
+            if (running && hasWindow)
+            {
+                hadWindow = true;
+                windowlessTicks = 0;
+                return false;
+            }
+            if (!hadWindow) return false;
+            if (running && ++windowlessTicks < 2) return false;
+            hadWindow = false;
+            windowlessTicks = 0;
+            return true;
+        }
         /// <summary>Running last tick, and whether it had a window open since it started, so
         /// an app quitting can be told from a helper that ends.</summary>
         public bool WasRunning;
@@ -609,8 +626,13 @@ public sealed class Model
                 return $"{name} opens from links and files again";
 
             case Pane.Network:
+                // A previous failed restore may already have removed deleted IDs
+                // from the helper's history. Don't send those stale IDs again.
+                var existingRules = (Firewall.Read() ?? throw new InvalidOperationException("Couldn't read firewall rules."))
+                    .Select(r => r.Id).ToHashSet();
                 var restore = new List<ElevatedOp> { new ElevatedOp.RemoveBlocks(client.Key) };
-                restore.AddRange((Settings.DisabledRules.GetValueOrDefault(client.Key) ?? []).Select(id => new ElevatedOp.SetRuleEnabled(id, true)));
+                restore.AddRange((Settings.DisabledRules.GetValueOrDefault(client.Key) ?? [])
+                    .Where(existingRules.Contains).Select(id => new ElevatedOp.SetRuleEnabled(id, true)));
                 if (Elevated.Run(restore) is { } failed) throw new InvalidOperationException(failed);
                 Settings.DisabledRules.Remove(client.Key);
                 Settings.Save();
@@ -735,7 +757,16 @@ public sealed class Model
         {
             if (!allowAdmin)
             {
-                skippedAdmin = true;
+                // Automatic stops may use the installed helper, but must never
+                // raise UAC or change whether a service is allowed to run again.
+                var stops = ops.OfType<ElevatedOp.StopService>().Cast<ElevatedOp>().ToList();
+                if (stops.Count > 0)
+                {
+                    var reply = Helper.Send(stops);
+                    if (reply?.Error is { } error) errors.Add(error);
+                    skippedAdmin = reply is null || reply.Rejected.Count > 0;
+                }
+                skippedAdmin |= ops.Any(op => op is not ElevatedOp.StopService);
             }
             else if (Elevated.Run(ops) is { } error)
             {
@@ -850,26 +881,14 @@ public sealed class Model
             var below = Processes.Descendants(procs, roots);
             var watch = watches.TryGetValue(row.Client, out var w) ? w : watches[row.Client] = new Watch();
 
-            if (Settings.RevokeOnClose)
+            if (Settings.RevokeOnClose && watch.Closed(own.Count > 0, row.HasWindow))
             {
                 if (own.Count == 0)
                 {
                     // It quit. Whatever it started that's still running was left behind.
-                    if (watch.HadWindow) orphans.AddRange(watch.Tree.Where(p => alive.Contains((p.Pid, p.Started))));
-                    watch.HadWindow = false;
-                    watch.WindowlessTicks = 0;
+                    orphans.AddRange(watch.Tree.Where(p => alive.Contains((p.Pid, p.Started))));
                 }
-                else if (row.HasWindow)
-                {
-                    watch.HadWindow = true;
-                    watch.WindowlessTicks = 0;
-                }
-                else if (watch.HadWindow && ++watch.WindowlessTicks >= 2)
-                {
-                    // Two ticks without a window, so a window being replaced doesn't count.
-                    watch.HadWindow = false;
-                    due.Add((row.Client, "its last window closed"));
-                }
+                due.Add((row.Client, "its last window closed"));
             }
             watch.Tree = procs.Where(p => roots.Contains(p.Pid) || below.Contains(p.Pid)).ToList();
 
