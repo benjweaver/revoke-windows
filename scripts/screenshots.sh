@@ -129,22 +129,38 @@ read_row() {
 	w=${size%x*} h=${size#*x}
 }
 
-# Clicks the Revoke tray icon, which opens or closes its panel.
-click_tray() {
-	local rect r
+# Prints the Revoke tray button's rectangle as "x,y,w,h".
+tray_rect() {
+	local rect
 	rect=$("$win_sh" uia list | tr -d '\r' | awk -F'\t' '$1 == "Button" && index($2, "Revoke:") == 1 { print $NF; exit }')
 	[[ -n $rect ]] || die "no Revoke tray button, so the pin didn't take"
-	r=(${(s:,:)rect})
+	print -r -- $rect
+}
+
+# Clicks the Revoke tray icon, which opens or closes its panel.
+click_tray() {
+	local r
+	r=(${(s:,:)$(tray_rect)})
 	"$win_sh" click $(( r[1] + r[3] / 2 )) $(( r[2] + r[4] / 2 ))
 }
 
-# shoot_panel FILE: shoots the open Revoke panel into FILE and closes it.
+# shoot_panel FILE: shoots the open Revoke panel into FILE, down to the taskbar so the lock
+# in the tray shows, and closes the panel.
 shoot_panel() {
-	local row
+	local row r left top right bottom pad=12
 	row=$(window_row Revoke '')
 	[[ -n $row ]] || die "the Revoke panel didn't open"
 	read_row "$row"
-	"$win_sh" shot "$1" $hwnd
+	r=(${(s:,:)$(tray_rect)})
+	left=$(( (x < r[1] ? x : r[1]) - pad ))
+	top=$(( y - pad ))
+	right=$(( (x + w > r[1] + r[3] ? x + w : r[1] + r[3]) + pad ))
+	bottom=$(( r[2] + r[4] + pad ))
+	# Off the tray icon, so no tooltip or hover state shows. The icon stays highlighted
+	# while its panel is open, as the open menu bar item does on macOS.
+	"$win_sh" move 1 1 >/dev/null
+	sleep 1
+	"$win_sh" shot "$1" "$left,$top,$(( right - left )),$(( bottom - top ))"
 	"$win_sh" key esc >/dev/null
 }
 
@@ -261,9 +277,10 @@ say "pinning Revoke's tray icon to the taskbar"
 pin=$(cat <<'PS'
 Get-ChildItem -Path 'HKCU:\Control Panel\NotifyIconSettings' | ForEach-Object {
     $p = Get-ItemProperty -Path $_.PSPath
-    if ($p.ExecutablePath -and $p.ExecutablePath.EndsWith('Programs\Revoke\Revoke.exe', [StringComparison]::OrdinalIgnoreCase) -and $p.IsPromoted -ne 1) {
+    if ($p.ExecutablePath -and $p.ExecutablePath.EndsWith('Programs\Revoke\Revoke.exe', [StringComparison]::OrdinalIgnoreCase)) {
+        # Already pinned counts too: restoring it sets 1 again.
         $old = if ($null -eq $p.IsPromoted) { 'none' } else { $p.IsPromoted }
-        Set-ItemProperty -Path $_.PSPath -Name IsPromoted -Value 1 -Type DWord
+        if ($p.IsPromoted -ne 1) { Set-ItemProperty -Path $_.PSPath -Name IsPromoted -Value 1 -Type DWord }
         Write-Output "$($_.PSChildName)|$old"
     }
 }
