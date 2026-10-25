@@ -7,6 +7,13 @@ from its section below.
 
 ## [Unreleased]
 
+### Fixed
+
+- With services set to start on demand, a watched app's service that Windows started
+  without the app (at boot, or during an app update that set it back to Automatic, as
+  ChatGPT's CodexSandboxService was) kept running. Revoke now stops a watched app's
+  service whenever the app itself isn't running, and opening the app starts it again.
+
 ## [0.4.0] - 2026-10-23
 
 ### Added

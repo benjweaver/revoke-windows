@@ -67,7 +67,8 @@ to leave them be). Windows' service API lets only the package installer change a
 packaged app's service, so Revoke sets it to Manual in the service's registry key,
 through the admin helper, from the next restart, and sets it again if an app update puts
 it back. Claude's service has a start trigger, so Windows starts it when Claude connects
-to it; Codex starts its own.
+to it; Codex starts its own. If one runs anyway while its app isn't open (an update can
+start it before Revoke sets it back), Revoke stops it.
 
 **Revoke all watched** does every column for every watched app, stopping them included,
 behind one admin prompt. Apps signed by Anthropic and OpenAI are watched by default; any

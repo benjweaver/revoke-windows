@@ -391,7 +391,7 @@ public sealed class Model
         {
             var what = new List<string>();
             if (runningServices.Count > 0) what.Add("is running");
-            what.Add(f.Services.Any(s => s.StartsWithWindows) ? "starts with Windows" : "starts only when an app starts it");
+            what.Add(f.Services.Any(s => s.StartsWithWindows) ? "starts with Windows" : Settings.ServicesStartOnDemand ? "runs only while the app is open" : "starts only when an app starts it");
             var system = f.Services.Any(s => s.RunsAsSystem) ? ", which runs as SYSTEM," : "";
             help = $"{serviceNames}{system} {string.Join(" and ", what)}.{StartsOnDemand(f.Services)} Switch off to stop it and keep it stopped.";
         }
@@ -903,6 +903,7 @@ public sealed class Model
         }
 
         Activity? activity = KeepServicesStopped() ?? KeepServicesOnDemand();
+        activity = StopServicesWithoutApp() ?? activity;
         activity = KeepLinksBlocked() ?? activity;
         if (orphans.Count > 0)
         {
@@ -1046,6 +1047,70 @@ public sealed class Model
             ? $"Set {List(first.Select(s => s.Name))} to start only when an app starts it, from the next restart"
             : $"Set {List(again.Select(s => s.Name))} to start only when an app starts it again, after an update changed it");
     }
+
+    /// <summary>
+    /// While services are meant to start on demand, stops a watched app's service that's
+    /// running while the app itself isn't: one Windows started at boot or during an app
+    /// update (which can set it back to Automatic before Revoke sets it to Manual again),
+    /// or one the app left running when it quit. Opening the app starts it again. As the
+    /// user where Windows allows it, through the helper otherwise, never with a UAC prompt.
+    /// </summary>
+    Activity? StopServicesWithoutApp()
+    {
+        if (!Settings.ServicesStartOnDemand) return null;
+        var idle = new List<Service>();
+        foreach (var row in Snapshot.Watched)
+        {
+            if (facts.GetValueOrDefault(row.Client) is not { } f) continue;
+            var helpers = f.Helpers.Select(h => facts.GetValueOrDefault(h)).OfType<Facts>().ToList();
+            var appServices = f.Services.Concat(helpers.SelectMany(h => h.Services))
+                .Where(s => !Settings.KeepStopped.Contains(s.Name)).ToList();
+            if (!appServices.Any(s => s.Running)) continue;
+            if (AppRunning(procs, f.Procs.Concat(helpers.SelectMany(h => h.Procs)), appServices, row.Client.Family)) continue;
+            idle.AddRange(appServices.Where(s => s.Running));
+        }
+        idle = idle.DistinctBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        // A service counts as running until it has stopped, which can take longer than a
+        // tick: it's asked once, so the log says so once.
+        stopping.IntersectWith(idle.Select(s => s.Name));
+        idle.RemoveAll(s => stopping.Contains(s.Name));
+        if (idle.Count == 0) return null;
+        var stopped = idle.Where(s => Services.TrySet(s.Name, running: false)).Select(s => s.Name).ToList();
+        var rest = idle.Where(s => !stopped.Contains(s.Name)).Select(s => (ElevatedOp)new ElevatedOp.StopService(s.Name)).ToList();
+        if (rest.Count > 0 && Helper.IsRunning && Helper.Send(rest) is { Error: null } reply)
+        {
+            stopped.AddRange(rest.Where((_, i) => !reply.Rejected.Contains(i)).Select(op => ((ElevatedOp.StopService)op).Name));
+        }
+        stopping.UnionWith(stopped);
+        if (stopped.Count == 0) return null;
+        return LastActivity = Activity.Now($"Stopped {List(stopped)}, which was running without its app; it starts again when you open the app");
+    }
+
+    /// <summary>Services StopServicesWithoutApp asked to stop that hadn't stopped by the last tick.</summary>
+    readonly HashSet<string> stopping = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether any of an app's processes is the app itself rather than one of its
+    /// services or something a service started. A service's process can carry the app's
+    /// package identity, so it lands among the app's processes. For ChatGPT, a Codex CLI
+    /// started from a terminal counts too, since it uses ChatGPT's sandbox service.</summary>
+    internal static bool AppRunning(IReadOnlyList<Proc> all, IEnumerable<Proc> own, IReadOnlyList<Service> appServices, string? family)
+    {
+        var programs = appServices.Select(s => s.Program).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var names = appServices.Select(s => Path.GetFileName(s.Program)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        bool IsService(Proc p) => p.Path is { } path ? programs.Contains(path) : names.Contains(p.Name);
+        var serviceRoots = all.Where(IsService).Select(p => p.Pid).ToHashSet();
+        var serviceTree = Processes.Descendants(all, serviceRoots);
+        serviceTree.UnionWith(serviceRoots);
+        if (own.Any(p => !serviceTree.Contains(p.Pid))) return true;
+        return IsChatGpt(family) && CodexCliRunning(all.Where(p => !serviceTree.Contains(p.Pid)));
+    }
+
+    static bool IsChatGpt(string? family) => family?.StartsWith("OpenAI.Codex_", StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>Whether a Codex CLI is running outside ChatGPT's package: one installed with
+    /// npm, or ChatGPT's copy started from a terminal.</summary>
+    internal static bool CodexCliRunning(IEnumerable<Proc> procs) =>
+        procs.Any(p => p.Name.Equals("codex.exe", StringComparison.OrdinalIgnoreCase) && !IsChatGpt(p.Family));
 
     List<Service> WatchedServices() =>
         Snapshot.Watched.SelectMany(r => facts.GetValueOrDefault(r.Client)?.Services ?? [])
