@@ -7,6 +7,8 @@ from its section below.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-25
+
 ### Fixed
 
 - With services set to start on demand, a watched app's service that Windows started
@@ -221,6 +223,9 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.4.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.4.1
+[0.4.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.4.0
+[0.3.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.3.1
 [0.3.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.3.0
 [0.2.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.2.0
 [0.1.6]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.1.6
