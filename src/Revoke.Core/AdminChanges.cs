@@ -97,7 +97,7 @@ public static partial class AdminChanges
             rule.Name = $"Revoke: keep {block.Label} off the local network";
             rule.Description = Firewall.DescriptionPrefix + block.ClientKey;
             rule.Grouping = Firewall.Group;
-            rule.ApplicationName = block.Program;
+            rule.ApplicationName = Firewall.LongProgramPath(block.Program);
             rule.Protocol = protocol; // before ports, which only apply to TCP and UDP
             rule.RemotePorts = Firewall.Ports;
             rule.RemoteAddresses = string.Join(',', Firewall.LocalAddresses);
@@ -126,7 +126,7 @@ public static partial class AdminChanges
             rule.Name = $"Revoke: keep {block.Label} to its model's hosts on the internet";
             rule.Description = Firewall.InternetDescriptionPrefix + block.ClientKey;
             rule.Grouping = Firewall.Group;
-            rule.ApplicationName = block.Program;
+            rule.ApplicationName = Firewall.LongProgramPath(block.Program);
             rule.Protocol = protocol; // before ports, which only apply to TCP and UDP
             rule.RemotePorts = Firewall.Ports;
             rule.RemoteAddresses = remoteAddresses;

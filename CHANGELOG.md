@@ -19,6 +19,8 @@ from its section below.
 ### Fixed
 
 - Firewall rules skip temporary updater programs that do not end in `.exe`.
+- Firewall rules expand short Windows executable paths before adding rules for
+  updater processes.
 - Internet host resolution no longer reads Windows' DNS cache through an undocumented
   native API. Add any uncommon provider hosts explicitly in Settings.
 - Access requests and helper calls now bound incoming lines and time out stalled

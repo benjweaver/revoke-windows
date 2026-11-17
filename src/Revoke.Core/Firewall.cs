@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Runtime.InteropServices;
 
 namespace Revoke.Core;
 
@@ -29,7 +30,7 @@ public sealed record FirewallRule(string Id, string Name, bool Inbound, bool All
 /// local network. The internet stays reachable, and so does DNS, which apps built
 /// on Chromium send straight to the router.
 /// </summary>
-public static class Firewall
+public static partial class Firewall
 {
     const string Rules = @"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules";
 
@@ -55,6 +56,29 @@ public static class Firewall
         !string.IsNullOrWhiteSpace(path) &&
         Path.IsPathFullyQualified(path) &&
         string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Windows can report a running program through an 8.3 path. Expand it
+    /// before giving it to the firewall, which may reject the short form.</summary>
+    internal static unsafe string LongProgramPath(string path)
+    {
+        Span<char> buffer = stackalloc char[512];
+        fixed (char* chars = buffer)
+        {
+            var length = GetLongPathNameW(path, chars, (uint)buffer.Length);
+            if (length is > 0 and < 512) return new string(chars, 0, (int)length);
+            if (length == 0) return path;
+            var larger = new char[length];
+            fixed (char* longChars = larger)
+            {
+                var retry = GetLongPathNameW(path, longChars, (uint)larger.Length);
+                return retry is > 0 && retry < larger.Length
+                    ? new string(longChars, 0, (int)retry) : path;
+            }
+        }
+    }
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetLongPathNameW", StringMarshalling = StringMarshalling.Utf16)]
+    private static unsafe partial uint GetLongPathNameW(string shortPath, char* longPath, uint size);
 
     /// <summary>Tells when a rule in the local policy store is added, changed, or removed.</summary>
     public static RegistryWatch Watch() => new(Registry.LocalMachine, Rules, subtree: false);

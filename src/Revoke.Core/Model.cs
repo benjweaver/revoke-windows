@@ -531,6 +531,7 @@ public sealed class Model
         return programs
             .Where(Firewall.IsExecutable)
             .Where(File.Exists)
+            .Select(Firewall.LongProgramPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();

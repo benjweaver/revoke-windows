@@ -1,8 +1,9 @@
+using System.Runtime.InteropServices;
 using Xunit;
 
 namespace Revoke.Core.Tests;
 
-public class FirewallProgramsTests : IDisposable
+public partial class FirewallProgramsTests : IDisposable
 {
     readonly string tempDir = Path.Combine(Path.GetTempPath(), $"revoke-fw-test-{Guid.NewGuid():N}");
 
@@ -24,6 +25,20 @@ public class FirewallProgramsTests : IDisposable
     public void IsExecutableAcceptsOnlyFullyQualifiedExePaths(string? path, bool expected) =>
         Assert.Equal(expected, Firewall.IsExecutable(path));
 
+    [LibraryImport("kernel32.dll", EntryPoint = "GetShortPathNameW", StringMarshalling = StringMarshalling.Utf16)]
+    private static unsafe partial uint GetShortPathNameW(string longPath, char* shortPath, uint size);
+
+    static unsafe string ShortPath(string path)
+    {
+        var buffer = new char[1024];
+        fixed (char* chars = buffer)
+        {
+            var length = GetShortPathNameW(path, chars, (uint)buffer.Length);
+            Assert.InRange(length, 1u, (uint)buffer.Length - 1);
+            return new string(chars, 0, (int)length);
+        }
+    }
+
     [Fact]
     public void ProgramsOfExcludesNonExeHelpersSuchAsInnoSetupTempUpdaters()
     {
@@ -35,7 +50,7 @@ public class FirewallProgramsTests : IDisposable
         File.WriteAllBytes(tempUpdater, []);
 
         var client = Client.FromPath(appExe);
-        Client[] helpers = [Client.FromPath(helperExe), Client.FromPath(tempUpdater)];
+        Client[] helpers = [Client.FromPath(ShortPath(helperExe)), Client.FromPath(tempUpdater)];
 
         var programs = Model.ProgramsOf(client, [], helpers);
 
