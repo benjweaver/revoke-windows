@@ -88,16 +88,21 @@ public static partial class AdminChanges
     static void AddBlocks(ElevatedOp.BlockLocalNetwork block)
     {
         if (!Firewall.IsExecutable(block.Program)) return;
+        var program = Firewall.LongProgramPath(block.Program);
+        var ownRules = (Firewall.Read() ?? throw new InvalidOperationException("Couldn't read firewall rules."))
+            .Where(r => r.Group == Firewall.Group && r.Description == Firewall.DescriptionPrefix + block.ClientKey);
+        var missing = Firewall.MissingBlockProtocols(program, ownRules);
+        if (missing.Length == 0) return;
         var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2", throwOnError: true)!;
         var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule", throwOnError: true)!;
         dynamic policy = Activator.CreateInstance(policyType)!;
-        foreach (var protocol in new[] { 6, 17 }) // TCP, UDP
+        foreach (var protocol in missing) // TCP, UDP
         {
             dynamic rule = Activator.CreateInstance(ruleType)!;
             rule.Name = $"Revoke: keep {block.Label} off the local network";
             rule.Description = Firewall.DescriptionPrefix + block.ClientKey;
             rule.Grouping = Firewall.Group;
-            rule.ApplicationName = Firewall.LongProgramPath(block.Program);
+            rule.ApplicationName = program;
             rule.Protocol = protocol; // before ports, which only apply to TCP and UDP
             rule.RemotePorts = Firewall.Ports;
             rule.RemoteAddresses = string.Join(',', Firewall.LocalAddresses);
@@ -113,6 +118,11 @@ public static partial class AdminChanges
     static void AddInternetBlocks(ElevatedOp.BlockInternet block)
     {
         if (!Firewall.IsExecutable(block.Program)) return;
+        var program = Firewall.LongProgramPath(block.Program);
+        var ownRules = (Firewall.Read() ?? throw new InvalidOperationException("Couldn't read firewall rules."))
+            .Where(r => r.Group == Firewall.Group && r.Description == Firewall.InternetDescriptionPrefix + block.ClientKey);
+        var missing = Firewall.MissingBlockProtocols(program, ownRules);
+        if (missing.Length == 0) return;
         var ips = InternetHosts.ResolveAllowedIps(block.Hosts);
         var ranges = InternetHosts.ComplementRanges(ips);
         if (ranges.Count == 0) return;
@@ -120,13 +130,13 @@ public static partial class AdminChanges
         var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2", throwOnError: true)!;
         var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule", throwOnError: true)!;
         dynamic policy = Activator.CreateInstance(policyType)!;
-        foreach (var protocol in new[] { 6, 17 }) // TCP, UDP
+        foreach (var protocol in missing) // TCP, UDP
         {
             dynamic rule = Activator.CreateInstance(ruleType)!;
             rule.Name = $"Revoke: keep {block.Label} to its model's hosts on the internet";
             rule.Description = Firewall.InternetDescriptionPrefix + block.ClientKey;
             rule.Grouping = Firewall.Group;
-            rule.ApplicationName = Firewall.LongProgramPath(block.Program);
+            rule.ApplicationName = program;
             rule.Protocol = protocol; // before ports, which only apply to TCP and UDP
             rule.RemotePorts = Firewall.Ports;
             rule.RemoteAddresses = remoteAddresses;

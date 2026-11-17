@@ -83,4 +83,64 @@ public partial class FirewallProgramsTests : IDisposable
         Assert.False(rule.Allow);
         Assert.False(rule.Inbound);
     }
+
+    [Fact]
+    public void CoverageRequiresActiveOutboundTcpAndUdpBlockRules()
+    {
+        const string program = @"C:\Apps\app.exe";
+        FirewallRule Rule(int protocol, bool active = true, bool inbound = false, bool allow = false) =>
+            new(Guid.NewGuid().ToString(), "Test", inbound, allow, active, program, null, Firewall.Group)
+            { Protocol = protocol };
+
+        var tcp = Rule(6);
+        Assert.Equal([17], Firewall.MissingBlockProtocols(program, [tcp]));
+        Assert.DoesNotContain(program, Firewall.FullyBlockedPrograms([tcp]));
+        Assert.Equal([17], Firewall.MissingBlockProtocols(program,
+            [tcp, Rule(17, active: false), Rule(17, inbound: true), Rule(17, allow: true)]));
+
+        var both = new[] { tcp, Rule(17) };
+        Assert.Empty(Firewall.MissingBlockProtocols(program, both));
+        Assert.Contains(program, Firewall.FullyBlockedPrograms(both));
+        Assert.Equal([6, 17], Firewall.MissingBlockProtocols(@"C:\Apps\other.exe", both));
+    }
+
+    [Fact]
+    public void UpdatingAProgramAddsItsRulesWithoutRemovingExistingBlocks()
+    {
+        const string oldProgram = @"C:\Apps\Old\app.exe";
+        const string newProgram = @"C:\Apps\New\app.exe";
+        var client = Client.FromPath(oldProgram);
+        FirewallRule Rule(int protocol) =>
+            new(Guid.NewGuid().ToString(), "Test", false, false, true, oldProgram, null, Firewall.Group)
+            { Protocol = protocol };
+        var existing = new[] { Rule(6), Rule(17) };
+
+        var network = Model.PlanFirewallRepair(client, "App", Pane.Network,
+            [oldProgram, newProgram], existing, [], []);
+        Assert.Equal(newProgram, Assert.IsType<ElevatedOp.BlockLocalNetwork>(Assert.Single(network)).Program);
+
+        var internet = Model.PlanFirewallRepair(client, "App", Pane.Internet,
+            [oldProgram, newProgram], existing, [], ["api.example.com"]);
+        var added = Assert.IsType<ElevatedOp.BlockInternet>(Assert.Single(internet));
+        Assert.Equal(newProgram, added.Program);
+        Assert.Equal(["api.example.com"], added.Hosts);
+    }
+
+    [Fact]
+    public void RepairAlsoDisablesNewInboundAllowRules()
+    {
+        const string program = @"C:\Apps\app.exe";
+        var client = Client.FromPath(program);
+        FirewallRule Block(int protocol) =>
+            new(Guid.NewGuid().ToString(), "Block", false, false, true, program, null, Firewall.Group)
+            { Protocol = protocol };
+        var inbound = new FirewallRule("new-inbound-rule", "Allow", true, true, true, program, null, null);
+
+        var planned = Model.PlanFirewallRepair(client, "App", Pane.Network,
+            [program], [Block(6), Block(17)], [inbound], []);
+
+        var disable = Assert.IsType<ElevatedOp.SetRuleEnabled>(Assert.Single(planned));
+        Assert.Equal(inbound.Id, disable.Id);
+        Assert.False(disable.Enabled);
+    }
 }

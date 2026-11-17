@@ -80,6 +80,32 @@ public static partial class Firewall
     [LibraryImport("kernel32.dll", EntryPoint = "GetLongPathNameW", StringMarshalling = StringMarshalling.Utf16)]
     private static unsafe partial uint GetLongPathNameW(string shortPath, char* longPath, uint size);
 
+    /// <summary>Programs with active outbound block rules for both TCP and UDP.</summary>
+    internal static HashSet<string> FullyBlockedPrograms(IEnumerable<FirewallRule> rules)
+    {
+        var protocols = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in rules)
+        {
+            if (!IsActiveBlock(rule) || rule.Program is null) continue;
+            protocols.TryGetValue(rule.Program, out var covered);
+            protocols[rule.Program] = covered | (rule.Protocol == 6 ? 1 : 2);
+        }
+        return protocols.Where(pair => pair.Value == 3)
+            .Select(pair => pair.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The protocols a program still needs for one client's set of rules.</summary>
+    internal static int[] MissingBlockProtocols(string program, IEnumerable<FirewallRule> rules)
+    {
+        var covered = rules.Where(r => IsActiveBlock(r)
+                && string.Equals(r.Program, program, StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.Protocol).ToHashSet();
+        return new[] { 6, 17 }.Where(protocol => !covered.Contains(protocol)).ToArray();
+    }
+
+    static bool IsActiveBlock(FirewallRule rule) =>
+        rule.Active && !rule.Inbound && !rule.Allow && rule.Protocol is 6 or 17;
+
     /// <summary>Tells when a rule in the local policy store is added, changed, or removed.</summary>
     public static RegistryWatch Watch() => new(Registry.LocalMachine, Rules, subtree: false);
 
@@ -110,7 +136,7 @@ public static partial class Firewall
                 "Active" => rule with { Active = value == "TRUE" },
                 "Dir" => rule with { Inbound = value == "In" },
                 "Protocol" when int.TryParse(value, out var protocol) => rule with { Protocol = protocol },
-                "App" => rule with { Program = Environment.ExpandEnvironmentVariables(value) },
+                "App" => rule with { Program = LongProgramPath(Environment.ExpandEnvironmentVariables(value)) },
                 "Name" => rule with { Name = value },
                 "Desc" => rule with { Description = value },
                 "EmbedCtxt" => rule with { Group = value },

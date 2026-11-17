@@ -158,6 +158,7 @@ public sealed class Model
     readonly Dictionary<Client, DateTimeOffset> localNetworkAllowances = [];
     readonly Dictionary<Client, DateTimeOffset> internetAllowances = [];
     readonly Dictionary<Client, DateTimeOffset> limitRetry = [];
+    readonly Dictionary<(Client Client, Pane Pane), DateTimeOffset> firewallRepairRetry = [];
     readonly uint self = (uint)Environment.ProcessId;
 
     public Model(Settings? settings = null)
@@ -266,8 +267,7 @@ public sealed class Model
             f.Name = KnownName(path) ?? Description(path) ?? FallbackName(client);
         }
         FoldHelpers(all);
-        blockedPrograms = (rules ?? []).Where(r => r.RevokeClient is not null && r.Active && r.Program is not null)
-            .Select(r => r.Program!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        blockedPrograms = Firewall.FullyBlockedPrograms((rules ?? []).Where(r => r.RevokeClient is not null));
         facts = all;
         Snapshot = Build(rules is not null, consent.GloballyOn);
     }
@@ -463,10 +463,10 @@ public sealed class Model
         var programs = ProgramsOf(client, f);
         var covered = programs.Count(blockedPrograms.Contains);
         var blocked = f.Blocks.Count > 0 || (programs.Count > 0 && covered == programs.Count);
-        var stale = blocked && covered < programs.Count;
+        var stale = blocked && (covered < programs.Count || activeInbound.Count > 0);
         var networkOn = activeInbound.Count > 0 || !blocked;
         if (stale)
-            help = $"{name} has updated since Revoke blocked it, and the block doesn't cover the new version. Switch off to block it again.";
+            help = $"Revoke's local network block does not cover every program or inbound rule for {name} yet. Revoke will retry while its current admin helper runs. Switch off to retry now.";
         else if (blocked && activeInbound.Count == 0)
             help = $"Revoke keeps {name} off your local network. Switch on to stop blocking it.";
         else if (activeInbound.Count > 0)
@@ -476,11 +476,9 @@ public sealed class Model
         cells[Pane.Network] = new Cell(networkOn || stale, false, programs.Count > 0 || blocked, true, stale, help);
 
         // Internet: when off, keeps the app to its model's hosts and any added in Settings.
-        var internetRules = f.InternetBlocks.Where(r => r.Active && !r.Allow && !r.Inbound).ToList();
-        var internetBlocked = internetRules.Count > 0;
-        var internetStale = internetBlocked && programs.Any(program =>
-            !new[] { 6, 17 }.All(protocol => internetRules.Any(r => r.Protocol == protocol
-                && string.Equals(r.Program, program, StringComparison.OrdinalIgnoreCase))));
+        var internetBlocked = f.InternetBlocks.Count > 0;
+        var internetCovered = Firewall.FullyBlockedPrograms(f.InternetBlocks);
+        var internetStale = internetBlocked && programs.Any(program => !internetCovered.Contains(program));
         var hosts = InternetHosts.ForClient(client, f.Publisher ?? "", Settings.ExtraInternetHosts);
         var limit = hosts.Count == 0
             ? $"block {name}'s public TCP and UDP connections except DNS"
@@ -488,7 +486,7 @@ public sealed class Model
         var hostHint = hosts.Count == 0 ? " Add hosts in Settings if it needs any." : "";
         help = internetBlocked
             ? $"Revoke is set to {limit}.{hostHint} Switch on to give it the whole internet again."
-                + (internetStale ? $" {name} has updated since Revoke limited it, and the limit doesn't cover the new version. Switch off to limit it again." : "")
+                + (internetStale ? $" The limit does not cover every program {name} runs yet. Revoke will retry while its current admin helper runs. Switch off to retry now." : "")
             : $"{name} can reach anywhere on the internet. Switch off to {limit}.{hostHint} Your local network has its own switch.";
         cells[Pane.Internet] = new Cell(!internetBlocked || internetStale, false, programs.Count > 0 || internetBlocked, true, internetStale, help);
 
@@ -535,6 +533,26 @@ public sealed class Model
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>Adds only missing rules for a block already in effect. Existing rules
+    /// stay in place while an app's new programs are covered.</summary>
+    internal static List<ElevatedOp> PlanFirewallRepair(Client client, string name, Pane pane,
+        IReadOnlyList<string> programs, IReadOnlyList<FirewallRule> existing,
+        IReadOnlyList<FirewallRule> inbound, string[] hosts)
+    {
+        var covered = Firewall.FullyBlockedPrograms(existing);
+        var ops = pane == Pane.Network
+            ? inbound.Where(rule => rule.Active).Select(rule => (ElevatedOp)new ElevatedOp.SetRuleEnabled(rule.Id, false)).ToList()
+            : [];
+        ops.AddRange(programs.Where(program => !covered.Contains(program))
+            .Select(program => pane switch
+            {
+                Pane.Network => (ElevatedOp)new ElevatedOp.BlockLocalNetwork(client.Key, name, program),
+                Pane.Internet => new ElevatedOp.BlockInternet(client.Key, name, program, hosts),
+                _ => throw new ArgumentOutOfRangeException(nameof(pane)),
+            }));
+        return ops;
     }
 
     DateTimeOffset? DeadlineOf(Facts f)
@@ -1064,6 +1082,7 @@ public sealed class Model
         Activity? activity = KeepServicesStopped() ?? KeepServicesOnDemand();
         activity = StopServicesWithoutApp() ?? activity;
         activity = KeepLinksBlocked() ?? activity;
+        activity = KeepFirewallBlocks() ?? activity;
         if (orphans.Count > 0)
         {
             var (n, _) = Processes.KillTree(orphans, self);
@@ -1170,6 +1189,101 @@ public sealed class Model
         if (retaken.Count == 0) return null;
         var names = retaken.Distinct().ToList();
         return LastActivity = Activity.Now($"{List(names)} registered {(names.Count == 1 ? "its" : "their")} links again, so Revoke took them back");
+    }
+
+    /// <summary>Extends existing firewall blocks to new app versions and helpers without
+    /// removing the old rules first. Only the installed helper may do this in the background;
+    /// a missing helper must never cause an unexpected UAC prompt.</summary>
+    Activity? KeepFirewallBlocks()
+    {
+        if (!Helper.IsRunning || !Helper.IsCurrent) return null;
+        var now = DateTimeOffset.UtcNow;
+        var ops = new List<ElevatedOp>();
+        var repairing = new List<(Client Client, Pane Pane, string Name)>();
+        var disabling = new List<(Client Client, string Id, int Index)>();
+        foreach (var (client, f) in facts)
+        {
+            if (f.Blocks.Count == 0 && f.InternetBlocks.Count == 0) continue;
+            var programs = ProgramsOf(client, f);
+            if (programs.Count == 0) continue;
+            var name = f.Name ?? FallbackName(client);
+
+            if (f.Blocks.Count > 0)
+            {
+                var key = (client, Pane.Network);
+                var planned = PlanFirewallRepair(client, name, Pane.Network, programs, f.Blocks, f.Inbound, []);
+                if (planned.Count == 0) firewallRepairRetry.Remove(key);
+                else if (!firewallRepairRetry.TryGetValue(key, out var retry) || retry <= now)
+                {
+                    var start = ops.Count;
+                    ops.AddRange(planned);
+                    disabling.AddRange(planned.Select((op, index) => (op, index))
+                        .Where(item => item.op is ElevatedOp.SetRuleEnabled { Enabled: false })
+                        .Select(item => (client, ((ElevatedOp.SetRuleEnabled)item.op).Id, start + item.index)));
+                    repairing.Add((client, Pane.Network, name));
+                    firewallRepairRetry[key] = now.AddMinutes(1);
+                }
+            }
+
+            if (f.InternetBlocks.Count > 0)
+            {
+                var key = (client, Pane.Internet);
+                string[] hosts = [.. InternetHosts.ForClient(client, f.Publisher ?? "", Settings.ExtraInternetHosts)];
+                var planned = PlanFirewallRepair(client, name, Pane.Internet, programs, f.InternetBlocks, [], hosts);
+                if (planned.Count == 0) firewallRepairRetry.Remove(key);
+                else if (!firewallRepairRetry.TryGetValue(key, out var retry) || retry <= now)
+                {
+                    ops.AddRange(planned);
+                    repairing.Add((client, Pane.Internet, name));
+                    firewallRepairRetry[key] = now.AddMinutes(1);
+                }
+            }
+        }
+        if (ops.Count == 0) return null;
+
+        var reply = Helper.Send(ops);
+        string? saveError = null;
+        if (reply is not null && disabling.Count > 0)
+        {
+            var after = Firewall.Read()?.ToDictionary(rule => rule.Id);
+            if (after is null) saveError = "couldn't read the changed firewall rules";
+            else
+            {
+                var rejected = reply.Rejected.ToHashSet();
+                var changed = false;
+                foreach (var (client, id, index) in disabling)
+                {
+                    if (rejected.Contains(index) || !after.TryGetValue(id, out var rule) || rule.Active) continue;
+                    var saved = Settings.DisabledRules.TryGetValue(client.Key, out var list)
+                        ? list : Settings.DisabledRules[client.Key] = [];
+                    if (saved.Contains(id)) continue;
+                    saved.Add(id);
+                    changed = true;
+                }
+                if (changed)
+                {
+                    try { Settings.Save(); }
+                    catch (IOException e) { saveError = e.Message; }
+                }
+            }
+        }
+        Refresh(force: true);
+        var failed = reply is null ? "the admin helper did not answer"
+            : reply.Error ?? saveError ?? (reply.Rejected.Count > 0 ? "the admin helper declined a rule" : null);
+        if (failed is not null)
+            return LastActivity = Activity.Now($"Couldn't update firewall blocks: {failed}", isError: true);
+
+        var stillStale = repairing.Where(r => RowFor(r.Client)?.Cells[r.Pane].Stale == true).ToList();
+        if (stillStale.Count > 0)
+            return LastActivity = Activity.Now($"Couldn't update firewall blocks for {List(stillStale.Select(r => r.Name).Distinct())}", isError: true);
+
+        foreach (var (client, pane, _) in repairing)
+        {
+            if (RowFor(client)?.Cells[pane].Stale == false)
+                firewallRepairRetry.Remove((client, pane));
+        }
+        var names = repairing.Select(r => r.Name).Distinct().ToList();
+        return LastActivity = Activity.Now($"Repaired firewall blocks for {List(names)}");
     }
 
     /// <summary>

@@ -21,6 +21,9 @@ from its section below.
 - Firewall rules skip temporary updater programs that do not end in `.exe`.
 - Firewall rules expand short Windows executable paths before adding rules for
   updater processes.
+- Revoke now extends existing local-network and Internet blocks to new executable
+  paths after an app updates, and disables new inbound allow rules, using its admin
+  helper without opening the old blocks.
 - Internet host resolution no longer reads Windows' DNS cache through an undocumented
   native API. Add any uncommon provider hosts explicitly in Settings.
 - Access requests and helper calls now bound incoming lines and time out stalled

@@ -52,6 +52,12 @@ creates firewall rules. An address shared by other sites can remain reachable, a
 address that changes later can stop working until you switch Internet off again.
 DNS and protocols other than TCP and UDP are outside this switch's block.
 
+When an app update adds a new executable path or inbound allow rule, Revoke extends
+an existing Network or Internet block automatically while the current admin helper
+is running. It keeps the old blocks in place during the update. If the helper cannot
+repair a block, the panel warns that access is not fully blocked and retries;
+switching the column off retries immediately.
+
 The WATCHED header has a switch for each column. It is on if any watched app has
 that switch on; switching it off applies to every watched app. Switching it back on
 restores directly controllable access, or opens Windows Settings for privacy access.
