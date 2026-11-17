@@ -70,7 +70,26 @@ public class HelperTests
         Assert.Null(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", notepad)));
         Assert.NotNull(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", @"C:\nowhere\x.exe")));
         Assert.NotNull(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", "relative.exe")));
+        var tempUpdater = Path.Combine(Path.GetTempPath(), $"revoke-updater-{Guid.NewGuid():N}.tmp");
+        File.WriteAllBytes(tempUpdater, []);
+        try
+        {
+            Assert.NotNull(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", tempUpdater)));
+            Assert.NotNull(Policy().Check(new ElevatedOp.BlockInternet("exe:x", "X", tempUpdater, [])));
+        }
+        finally { File.Delete(tempUpdater); }
         Assert.Null(Policy().Check(new ElevatedOp.RemoveBlocks("pkg:Claude_pzs8sxrjxfjjc")));
+    }
+
+    [Fact]
+    public void RejectsMalformedPipeOperationsWithoutThrowing()
+    {
+        var policy = Policy();
+        var malformed = JsonSerializer.Deserialize<HelperRequest>(
+            """{"ops":[{"op":"blockInternet","clientKey":"exe:x","label":"X","program":"C:\\Windows\\notepad.exe","hosts":null},{"op":"removeBlocks","clientKey":null},null]}""",
+            Helper.Json);
+        Assert.NotNull(malformed);
+        Assert.All(malformed.Ops, op => Assert.NotNull(policy.Check(op)));
     }
 
     [Fact]
@@ -111,7 +130,7 @@ public class HelperTests
             new ElevatedOp.StopService("CoworkVMService"),
             new ElevatedOp.SetServiceStart("CoworkVMService", 3),
             new ElevatedOp.SetRuleEnabled("{in-allow}", false),
-            new ElevatedOp.BlockLocalNetwork("pkg:A_b", "Ben\u2019s app", @"C:\a.exe"),
+            new ElevatedOp.BlockLocalNetwork("pkg:A_b", "Sample app", @"C:\a.exe"),
             new ElevatedOp.RemoveBlocks("pkg:A_b"),
             new ElevatedOp.SetMachineStartup(true, "Claude", true),
         ];

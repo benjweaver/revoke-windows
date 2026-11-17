@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace Revoke.Core;
@@ -21,6 +23,10 @@ namespace Revoke.Core;
 /// <param name="Moved">Blocked, but by a Revoke.exe somewhere other than this one.</param>
 public sealed record LinkHandler(Client Client, string Key, string Verb, string? Scheme, string? Aumid, bool IsFile,
     string? Program, bool Blocked, bool Moved = false);
+
+public sealed record ShownLink(string Text, int Omitted, bool IsLong);
+
+public sealed record LinkPrompt(LinkHandler Handler, string Target, string AppName, string Who, ShownLink Shown);
 
 /// <summary>
 /// Links and files that open an app. A web page, an email or a document can open an agent
@@ -59,7 +65,8 @@ public static class Links
                 using var key = classes.OpenSubKey(name);
                 if (key is null) continue;
                 if (name.StartsWith("AppX", StringComparison.OrdinalIgnoreCase)) ReadPackaged(name, key, handlers);
-                else if (key.GetValue("URL Protocol") is not null) ReadDesktop(name, key, handlers);
+                else if (!name.Equals(AccessRequest.Scheme, StringComparison.OrdinalIgnoreCase)
+                    && key.GetValue("URL Protocol") is not null) ReadDesktop(name, key, handlers);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
         }
@@ -158,6 +165,17 @@ public static class Links
         }
     }
 
+    /// <summary>Asks the person before <c>--restore-links</c> gives every app its links back.</summary>
+    public static bool ConfirmRestore() =>
+        Native.MessageBoxW(0,
+            "Give every app its links back?\n\nSomething ran Revoke with --restore-links. Revoke will stop asking before links and files open the apps it stands in for. Say yes only if you ran this yourself, for example while removing Revoke.",
+            "Revoke", Native.MB_YESNO | Native.MB_ICONWARNING | Native.MB_DEFBUTTON2 | Native.MB_SETFOREGROUND | Native.MB_TOPMOST) == Native.IDYES;
+
+    /// <summary>Shows a topmost message box for a link error.</summary>
+    public static void ShowMessage(string text, bool error = false) =>
+        Native.MessageBoxW(0, text, "Revoke",
+            Native.MB_OK | (error ? Native.MB_ICONERROR : Native.MB_ICONWARNING) | Native.MB_SETFOREGROUND | Native.MB_TOPMOST);
+
     /// <summary>Puts every app's own entry back, as when Revoke is uninstalled.</summary>
     public static int UnblockAll()
     {
@@ -177,55 +195,42 @@ public static class Links
     // Opening a link Revoke stood in for
 
     /// <summary>
-    /// Windows opened Revoke in an app's place. Shows the person what's being opened and by
-    /// whom, and opens the app only if they say so. The link is shown whole, since it's the
-    /// part that can carry instructions for the agent.
+    /// Windows opened Revoke in an app's place. Builds what to show the person: who is
+    /// asking, which app, and the whole link made safe to read.
     /// </summary>
-    public static void Handle(string key, string verb, string target)
+    public static LinkPrompt? PreparePrompt(string key, string verb, string target)
     {
         var handler = Read().FirstOrDefault(h => h.Key.Equals(key, StringComparison.OrdinalIgnoreCase)
             && h.Verb.Equals(verb, StringComparison.OrdinalIgnoreCase));
-        if (handler is null)
-        {
-            Native.MessageBoxW(0, "Revoke stopped something opening an app, but the app's entry is gone, so it can't be opened from here.",
-                "Revoke", Native.MB_OK | Native.MB_ICONWARNING | Native.MB_SETFOREGROUND | Native.MB_TOPMOST);
-            return;
-        }
+        if (handler is null) return null;
         var appName = NameOf(handler);
-        var opener = Opener();
-        var who = opener is null ? "Something" : opener;
-        string message;
-        if (handler.IsFile)
-        {
-            message = $"{who} wants to open this file in {appName}:\n\n{Shown(target)}\n\n"
-                + $"Open it only if you just opened it yourself. A file can carry instructions for {appName}.";
-        }
-        else
-        {
-            message = $"{who} wants to open {appName} with this link:\n\n{Shown(Readable(target))}\n\n"
-                + $"Open it only if you just clicked it yourself. A link can carry instructions for {appName}, "
-                + "like a prompt for it to run.";
-        }
-        var answer = Native.MessageBoxW(0, message + $"\n\nOpen {appName}?", "Revoke",
-            Native.MB_YESNO | Native.MB_ICONWARNING | Native.MB_DEFBUTTON2 | Native.MB_SETFOREGROUND | Native.MB_TOPMOST);
-        var what = handler.IsFile ? "a file" : "a link";
-        if (answer != Native.IDYES)
+        var who = Opener() ?? "Something";
+        var shown = Shown(handler.IsFile ? target : Readable(target));
+        return new LinkPrompt(handler, target, appName, who, shown);
+    }
+
+    /// <summary>Opens the app if allowed, or logs the refusal. Returns an error message if opening failed.</summary>
+    public static string? AnswerPrompt(LinkPrompt prompt, bool allow)
+    {
+        var what = prompt.Handler.IsFile ? "a file" : "a link";
+        if (!allow)
         {
             // Mid-sentence, "A command (curl.exe)" and "Something" start lowercase.
-            var kept = who.StartsWith("A command", StringComparison.Ordinal) || who == "Something" ? char.ToLowerInvariant(who[0]) + who[1..] : who;
-            Log.Write($"Kept {kept} from opening {appName} with {what}: {target}");
-            return;
+            var kept = prompt.Who.StartsWith("A command", StringComparison.Ordinal) || prompt.Who == "Something"
+                ? char.ToLowerInvariant(prompt.Who[0]) + prompt.Who[1..] : prompt.Who;
+            Log.Write($"Kept {kept} from opening {prompt.AppName} with {what}: {prompt.Target}");
+            return null;
         }
         try
         {
-            Open(handler, target);
-            Log.Write($"Opened {appName} with {what} you allowed: {target}");
+            Open(prompt.Handler, prompt.Target);
+            Log.Write($"Opened {prompt.AppName} with {what} you allowed: {prompt.Target}");
+            return null;
         }
         catch (Exception e) when (e is IOException or InvalidOperationException or COMException or System.ComponentModel.Win32Exception)
         {
-            Log.Write($"Failed: couldn't open {appName}: {e.Message}");
-            Native.MessageBoxW(0, $"Couldn't open {appName}: {e.Message}", "Revoke",
-                Native.MB_OK | Native.MB_ICONERROR | Native.MB_SETFOREGROUND);
+            Log.Write($"Failed: couldn't open {prompt.AppName}: {e.Message}");
+            return e.Message;
         }
     }
 
@@ -297,28 +302,69 @@ public static class Links
         catch (UriFormatException) { return link; }
     }
 
+    /// <summary>Past this many characters the dialog tells the person to scroll through the link.</summary>
+    public const int LongLink = 600;
+    /// <summary>Only a link of many megabytes is ever cut, because the text box can't lay it out.</summary>
+    public const int HardLimit = 200_000;
+
     /// <summary>
-    /// Text safe to show: characters that reorder or hide text (right-to-left overrides,
-    /// zero-width spaces) are shown as escapes, so a link can't make itself look like
-    /// something else, and very long text is cut.
+    /// Text safe to show, whole: characters that reorder or hide text (right-to-left
+    /// overrides, zero-width and tag characters, controls) are shown as \uXXXX escapes, so
+    /// a link can't make itself look like something else. Runs of blank lines and of
+    /// spaces are shortened, so whitespace can't push text out of view. Only a link past
+    /// <paramref name="limit"/> characters is cut, and <see cref="ShownLink.Omitted"/> says how much.
     /// </summary>
-    internal static string Shown(string text)
+    public static ShownLink Shown(string text, int limit = HardLimit)
     {
-        const int max = 1500;
         var shown = new StringBuilder();
-        foreach (var c in text)
+        var count = 0;
+        var total = 0;
+        foreach (var rune in text.EnumerateRunes())
         {
-            if (shown.Length >= max)
+            total++;
+            if (count >= limit) continue;
+            count++;
+            if (IsHidden(rune))
             {
-                shown.Append($"… ({text.Length - max} more characters)");
-                break;
+                // Past U+FFFF the digits go in braces, so they can't run into text after them.
+                shown.Append(rune.Value > 0xFFFF ? $"\\u{{{rune.Value:X}}}" : $"\\u{rune.Value:X4}");
             }
-            var hidden = char.IsControl(c) && c is not ('\n' or '\t')
-                || c is >= '​' and <= '‏' or >= '‪' and <= '‮' or >= '⁦' and <= '⁩' or '﻿';
-            if (hidden) shown.Append($"\\u{(int)c:X4}");
-            else shown.Append(c);
+            else
+            {
+                shown.Append(rune.ToString());
+            }
         }
-        return shown.ToString();
+        var squeezed = Squeezed(shown.ToString());
+        var runeCount = squeezed.EnumerateRunes().Count();
+        var lines = squeezed.Count(c => c == '\n');
+        return new ShownLink(squeezed, total - count, runeCount > LongLink || lines > 10);
+    }
+
+    // Links can be supplied by a web page. NonBacktracking keeps long runs of
+    // whitespace from turning the prompt's display cleanup into quadratic work.
+    static readonly Regex BlankLines = new(@"(?:[^\S\n]*\n){3,}", RegexOptions.NonBacktracking);
+    static readonly Regex LongSpaces = new(@"[^\S\n]{21,}", RegexOptions.NonBacktracking);
+
+    /// <summary>Three or more newlines in a row (with only spaces between) become one blank
+    /// line, and a run of more than 20 spaces is named instead of shown.</summary>
+    static string Squeezed(string text)
+    {
+        var result = BlankLines.Replace(text, "\n\n");
+        return LongSpaces.Replace(result, m => $" [{m.Value.EnumerateRunes().Count()} spaces] ");
+    }
+
+    /// <summary>Whether a character is invisible, or changes how the text around it looks: it
+    /// shows as an escape instead. Tab and newline are the only ones left as they are.</summary>
+    static bool IsHidden(Rune rune)
+    {
+        if (rune.Value is 0x0A or 0x09) return false;
+        // Variation selectors, Hangul fillers, and Unicode tag characters.
+        if (rune.Value is (>= 0xFE00 and <= 0xFE0F) or (>= 0xE0100 and <= 0xE01EF)
+            or 0x115F or 0x1160 or 0x3164 or 0xFFA0 or (>= 0xE0000 and <= 0xE007F))
+            return true;
+        return Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format
+            or UnicodeCategory.PrivateUse or UnicodeCategory.Surrogate or UnicodeCategory.OtherNotAssigned
+            or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
     }
 
     static string? Opener() => Opener(Processes.List(), (uint)Environment.ProcessId, IsConsole);

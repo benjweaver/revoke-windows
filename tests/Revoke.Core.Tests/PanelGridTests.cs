@@ -5,16 +5,18 @@ namespace Revoke.Core.Tests;
 public class PanelGridTests
 {
     [Fact]
-    public void LayoutKeepsRoomForAppAndTenSwitchColumns()
+    public void LayoutKeepsRoomForAppAndSwitchColumns()
     {
-        Assert.Equal(10, PanelGrid.ColumnCount);
-        Assert.Equal(824, PanelGrid.MinimumWidth);
+        Assert.Equal(11, PanelGrid.ColumnCount);
+        Assert.Equal(876, PanelGrid.MinimumWidth);
         Assert.Equal(256, PanelGrid.MinimumWidth - PanelGrid.Padding - PanelGrid.ColumnCount * PanelGrid.ColumnWidth);
         Assert.DoesNotContain(Pane.Running, PanelGrid.AccessPanes);
+        Assert.Contains(Pane.Internet, PanelGrid.AccessPanes);
     }
 
     [Theory]
     [InlineData(Pane.Running, true, true, false)]
+    [InlineData(Pane.Internet, true, true, true)]
     [InlineData(Pane.Camera, true, false, false)]
     [InlineData(Pane.Links, false, true, false)]
     [InlineData(Pane.Links, true, true, true)]

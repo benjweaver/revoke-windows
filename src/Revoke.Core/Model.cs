@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Revoke.Core;
 
 /// <summary>A column in the panel.</summary>
-public enum Pane { Running, Startup, Service, Links, Screen, Camera, Microphone, Location, Network }
+public enum Pane { Running, Startup, Service, Links, Screen, Camera, Microphone, Location, Network, Internet }
 
 /// <param name="On">Orange: the app can do this now.</param>
 /// <param name="InUse">Doing it this moment (camera, microphone, location, screen capture).</param>
@@ -59,6 +59,7 @@ public sealed record KnownApp(Client Client, string Name, string Publisher, bool
 public sealed class Model
 {
     public static readonly Pane[] AllPanes = Enum.GetValues<Pane>();
+    public static readonly Pane[] AllAccessPanes = AllPanes;
 
     /// <summary>What automatic revocations take away: everything that needs no admin prompt.
     /// Links too, so nothing can open an app that was stopped while nobody's looking.</summary>
@@ -81,6 +82,7 @@ public sealed class Model
         public List<LinkHandler> Links = [];
         public List<FirewallRule> Inbound = [];
         public List<FirewallRule> Blocks = [];
+        public List<FirewallRule> InternetBlocks = [];
         /// <summary>Programs that belong to the client, for firewall rules.</summary>
         public HashSet<string> Programs = new(StringComparer.OrdinalIgnoreCase);
         /// <summary>Watched programs this app started, which show in its row rather than their own.</summary>
@@ -153,6 +155,9 @@ public sealed class Model
     readonly Dictionary<string, bool> programsExist = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, Client> clientsByPath = new(StringComparer.Ordinal);
     readonly Dictionary<Client, Watch> watches = [];
+    readonly Dictionary<Client, DateTimeOffset> localNetworkAllowances = [];
+    readonly Dictionary<Client, DateTimeOffset> internetAllowances = [];
+    readonly Dictionary<Client, DateTimeOffset> limitRetry = [];
     readonly uint self = (uint)Environment.ProcessId;
 
     public Model(Settings? settings = null)
@@ -232,6 +237,10 @@ public sealed class Model
             {
                 For(client).Blocks.Add(rule);
             }
+            else if (rule.RevokeInternetClient is { } internetClient)
+            {
+                For(internetClient).InternetBlocks.Add(rule);
+            }
             else if (rule.Inbound && rule.Allow && rule.Program is { } program)
             {
                 var f = For(ClientOf(program));
@@ -282,7 +291,7 @@ public sealed class Model
         var watched = all.Where(kv => Settings.IsWatched(kv.Key, kv.Value.Publisher ?? "") && kv.Value.Procs.Count > 0).ToList();
         foreach (var (client, f) in watched)
         {
-            if (client.Kind != ClientKind.Exe || f.Startup.Count > 0 || f.Services.Count > 0 || f.Links.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0)
+            if (client.Kind != ClientKind.Exe || f.Startup.Count > 0 || f.Services.Count > 0 || f.Links.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0 || f.InternetBlocks.Count > 0)
                 continue;
             var pids = f.Procs.Select(p => p.Pid).ToHashSet();
             // The app furthest up the tree wins, so Codex's helpers fold into ChatGPT when ChatGPT started Codex.
@@ -325,7 +334,7 @@ public sealed class Model
             // Desktop programs that have only ever touched the shared switches, and aren't
             // running, have nothing left to revoke.
             var present = f.Package is not null || f.Procs.Count > 0 || f.Startup.Count > 0 || f.Services.Count > 0
-                || f.Links.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0;
+                || f.Links.Count > 0 || f.Inbound.Count > 0 || f.Blocks.Count > 0 || f.InternetBlocks.Count > 0;
             if (!present || !(isWatched || screenAllowed) || f.HelperOf is not null) continue;
             if (!isWatched && Settings.Hidden.Contains(client.Key)) continue;
             (isWatched ? watched : others).Add(MakeRow(client, f, isWatched, globallyOn));
@@ -466,6 +475,23 @@ public sealed class Model
             help = $"{name} can reach devices on your local network. Switch off to block it.";
         cells[Pane.Network] = new Cell(networkOn || stale, false, programs.Count > 0 || blocked, true, stale, help);
 
+        // Internet: when off, keeps the app to its model's hosts and any added in Settings.
+        var internetRules = f.InternetBlocks.Where(r => r.Active && !r.Allow && !r.Inbound).ToList();
+        var internetBlocked = internetRules.Count > 0;
+        var internetStale = internetBlocked && programs.Any(program =>
+            !new[] { 6, 17 }.All(protocol => internetRules.Any(r => r.Protocol == protocol
+                && string.Equals(r.Program, program, StringComparison.OrdinalIgnoreCase))));
+        var hosts = InternetHosts.ForClient(client, f.Publisher ?? "", Settings.ExtraInternetHosts);
+        var limit = hosts.Count == 0
+            ? $"block {name}'s public TCP and UDP connections except DNS"
+            : $"limit {name}'s public TCP and UDP connections to the IP addresses resolved for {List(hosts)}, except DNS";
+        var hostHint = hosts.Count == 0 ? " Add hosts in Settings if it needs any." : "";
+        help = internetBlocked
+            ? $"Revoke is set to {limit}.{hostHint} Switch on to give it the whole internet again."
+                + (internetStale ? $" {name} has updated since Revoke limited it, and the limit doesn't cover the new version. Switch off to limit it again." : "")
+            : $"{name} can reach anywhere on the internet. Switch off to {limit}.{hostHint} Your local network has its own switch.";
+        cells[Pane.Internet] = new Cell(!internetBlocked || internetStale, false, programs.Count > 0 || internetBlocked, true, internetStale, help);
+
         var helpers = f.Helpers.Select(h => facts.GetValueOrDefault(h)?.Name ?? FallbackName(h)).Distinct().ToList();
         return new Row(client, name, f.Publisher ?? "", f.Package?.Logo, watched, cells,
             f.Procs.Count + f.Helpers.Sum(h => facts.GetValueOrDefault(h)?.Procs.Count ?? 0),
@@ -493,11 +519,21 @@ public sealed class Model
     /// <summary>The programs a client's firewall rules should cover: the ones it has run,
     /// declares, or has rules for, that exist now. For a desktop program that updates
     /// into new folders, every version that's there.</summary>
-    List<string> ProgramsOf(Client client, Facts f)
+    List<string> ProgramsOf(Client client, Facts f) =>
+        ProgramsOf(client, f.Programs, f.Helpers);
+
+    internal static List<string> ProgramsOf(Client client, IEnumerable<string> packagePrograms, IEnumerable<Client> helpers)
     {
-        var programs = (client.Kind == ClientKind.Package ? f.Programs.Where(client.MatchesPath) : Client.Expand(client.Id))
-            .Concat(f.Helpers.SelectMany(h => Client.Expand(h.Id)));
-        return programs.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
+        // Package identity comes from Windows, and a full-trust package can run a program
+        // outside its WindowsApps folder. Keep those paths alongside declared executables.
+        var programs = (client.Kind == ClientKind.Package ? packagePrograms : Client.Expand(client.Id))
+            .Concat(helpers.SelectMany(h => Client.Expand(h.Id)));
+        return programs
+            .Where(Firewall.IsExecutable)
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     DateTimeOffset? DeadlineOf(Facts f)
@@ -512,7 +548,9 @@ public sealed class Model
 
     public Row? RowFor(Client client) => Snapshot.AllRows.FirstOrDefault(r => r.Client == client);
 
-    string DisplayName(Client client) => RowFor(client)?.Name ?? facts.GetValueOrDefault(client)?.Name ?? FallbackName(client);
+    public string DisplayName(Client client) => RowFor(client)?.Name ?? facts.GetValueOrDefault(client)?.Name ?? FallbackName(client);
+
+    public Activity Note(string text, bool isError = false) => LastActivity = Activity.Now(text, isError);
 
     /// <summary>Apps the settings window can offer to watch: watched ones, apps with windows
     /// open, and packaged apps with anything in the lists.</summary>
@@ -634,14 +672,100 @@ public sealed class Model
                 restore.AddRange((Settings.DisabledRules.GetValueOrDefault(client.Key) ?? [])
                     .Where(existingRules.Contains).Select(id => new ElevatedOp.SetRuleEnabled(id, true)));
                 if (Elevated.Run(restore) is { } failed) throw new InvalidOperationException(failed);
+                localNetworkAllowances.Remove(client);
                 Settings.DisabledRules.Remove(client.Key);
                 Settings.Save();
                 return $"Stopped blocking the local network for {name}";
+
+            case Pane.Internet:
+                if (Elevated.Run([new ElevatedOp.RemoveInternetBlocks(client.Key)]) is { } internetFailed)
+                    throw new InvalidOperationException(internetFailed);
+                internetAllowances.Remove(client);
+                return $"Stopped limiting the internet for {name}";
 
             default:
                 Open(Consent.SettingsUri(CapabilityOf(pane)!.Value));
                 return $"Opened Settings to grant {Title(pane).ToLowerInvariant()} access";
         }
+    }
+
+    /// <summary>Whether the app's local network access is currently blocked by Revoke.</summary>
+    public bool IsLocalNetworkBlocked(Client client) => RowFor(client)?.IsOn(Pane.Network) == false;
+
+    /// <summary>
+    /// Lifts Revoke's local network block for <paramref name="clients"/> for
+    /// <paramref name="minutes"/> minutes, then blocks them again automatically when the helper is running.
+    /// </summary>
+    public Activity AllowLocalNetworkTemporarily(IReadOnlyList<Client> clients, int minutes, string displayName)
+    {
+        Refresh(force: true);
+        var blocked = clients.Where(IsLocalNetworkBlocked).ToList();
+        var existingRules = (Firewall.Read() ?? []).Select(r => r.Id).ToHashSet();
+        var ops = new List<ElevatedOp>();
+        foreach (var client in blocked)
+        {
+            ops.Add(new ElevatedOp.RemoveBlocks(client.Key));
+            ops.AddRange((Settings.DisabledRules.GetValueOrDefault(client.Key) ?? [])
+                .Where(existingRules.Contains).Select(id => new ElevatedOp.SetRuleEnabled(id, true)));
+        }
+
+        if (ops.Count > 0 && Elevated.Run(ops) is { } error)
+        {
+            return LastActivity = Activity.Now($"Couldn't allow local network for {displayName}: {error}", isError: true);
+        }
+
+        var canReblock = Helper.IsRunning;
+        var deadline = DateTimeOffset.Now.AddMinutes(minutes);
+        foreach (var client in blocked)
+        {
+            Settings.DisabledRules.Remove(client.Key);
+            if (canReblock) localNetworkAllowances[client] = deadline;
+        }
+        try { Settings.Save(); } catch (IOException) { }
+        Refresh(force: true);
+        return LastActivity = Activity.Now(canReblock
+            ? $"Allowed local network for {displayName} for {Settings.Describe(minutes)}"
+            : $"Allowed local network for {displayName}");
+    }
+
+    /// <summary>Whether the app's internet access is currently limited by Revoke.</summary>
+    public bool IsInternetLimited(Client client) =>
+        facts.GetValueOrDefault(client)?.InternetBlocks.Any(r => r.Active && !r.Allow && !r.Inbound) == true;
+
+    /// <summary>
+    /// Lifts Revoke's internet limit for <paramref name="clients"/> for
+    /// <paramref name="minutes"/> minutes, then limits them again automatically when the helper is running.
+    /// </summary>
+    public Activity AllowInternetTemporarily(IReadOnlyList<Client> clients, int minutes, string displayName)
+    {
+        Refresh(force: true);
+        var limited = clients.Where(IsInternetLimited).ToList();
+        var ops = limited.Select(client => (ElevatedOp)new ElevatedOp.RemoveInternetBlocks(client.Key)).ToList();
+
+        if (ops.Count > 0 && Elevated.Run(ops) is { } error)
+        {
+            return LastActivity = Activity.Now($"Couldn't allow internet for {displayName}: {error}", isError: true);
+        }
+
+        var canReblock = Helper.IsRunning;
+        var deadline = DateTimeOffset.Now.AddMinutes(minutes);
+        if (canReblock)
+        {
+            foreach (var client in limited) internetAllowances[client] = deadline;
+        }
+        Refresh(force: true);
+        return LastActivity = Activity.Now(canReblock
+            ? $"Allowed internet for {displayName} for {Settings.Describe(minutes)}"
+            : $"Allowed internet for {displayName}");
+    }
+
+    /// <summary>Opens Windows Settings to let the person grant a privacy permission.</summary>
+    public Activity OpenPrivacySettings(Pane pane, string displayName)
+    {
+        if (CapabilityOf(pane) is not { } capability)
+            return LastActivity ?? Activity.Now("");
+        Open(Consent.SettingsUri(capability));
+        return LastActivity = Activity.Now($"Opened Settings for you to allow {Title(pane).ToLowerInvariant()} for {displayName}");
     }
 
     /// <summary>
@@ -724,12 +848,20 @@ public sealed class Model
                         break;
 
                     case Pane.Network:
+                        if (allowAdmin) localNetworkAllowances.Remove(client);
                         var active = f.Inbound.Where(r => r.Active).Select(r => r.Id).ToList();
                         ops.AddRange(active.Select(id => new ElevatedOp.SetRuleEnabled(id, false)));
                         // Rebuilt whole, so an update's new programs are covered.
                         ops.Add(new ElevatedOp.RemoveBlocks(client.Key));
                         ops.AddRange(ProgramsOf(client, f).Select(p => new ElevatedOp.BlockLocalNetwork(client.Key, name, p)));
                         if (active.Count > 0) disabled.Add((client, active));
+                        break;
+
+                    case Pane.Internet:
+                        if (allowAdmin) internetAllowances.Remove(client);
+                        string[] allowedHosts = [.. InternetHosts.ForClient(client, f.Publisher ?? "", Settings.ExtraInternetHosts)];
+                        ops.Add(new ElevatedOp.RemoveInternetBlocks(client.Key));
+                        ops.AddRange(ProgramsOf(client, f).Select(p => new ElevatedOp.BlockInternet(client.Key, name, p, allowedHosts)));
                         break;
 
                     default:
@@ -757,16 +889,34 @@ public sealed class Model
         {
             if (!allowAdmin)
             {
-                // Automatic stops may use the installed helper, but must never
-                // raise UAC or change whether a service is allowed to run again.
-                var stops = ops.OfType<ElevatedOp.StopService>().Cast<ElevatedOp>().ToList();
-                if (stops.Count > 0)
+                // Automatic revocations may use the installed helper, but must never raise UAC.
+                if (Helper.IsRunning && Helper.Send(ops) is { } reply)
                 {
-                    var reply = Helper.Send(stops);
-                    if (reply?.Error is { } error) errors.Add(error);
-                    skippedAdmin = reply is null || reply.Rejected.Count > 0;
+                    if (reply.Error is { } error) errors.Add(error);
+                    skippedAdmin = reply.Rejected.Count > 0;
+                    var rejectedSet = reply.Rejected.ToHashSet();
+                    var acceptedRuleIds = ops
+                        .Select((op, i) => (op, i))
+                        .Where(x => !rejectedSet.Contains(x.i) && x.op is ElevatedOp.SetRuleEnabled { Enabled: false })
+                        .Select(x => ((ElevatedOp.SetRuleEnabled)x.op).Id)
+                        .ToHashSet();
+                    if (acceptedRuleIds.Count > 0)
+                    {
+                        foreach (var (client, ids) in disabled)
+                        {
+                            var saved = ids.Where(acceptedRuleIds.Contains).ToList();
+                            if (saved.Count == 0) continue;
+                            var list = Settings.DisabledRules.TryGetValue(client.Key, out var l) ? l : Settings.DisabledRules[client.Key] = [];
+                            list.AddRange(saved.Except(list).ToList());
+                        }
+                        try { Settings.Save(); }
+                        catch (IOException e) { errors.Add(e.Message); }
+                    }
                 }
-                skippedAdmin |= ops.Any(op => op is not ElevatedOp.StopService);
+                else
+                {
+                    skippedAdmin = true;
+                }
             }
             else if (Elevated.Run(ops) is { } error)
             {
@@ -812,8 +962,8 @@ public sealed class Model
         }
         else if (changed.Count == 0)
         {
-            // Automatic runs often find nothing to do; only answer a click.
-            if (reason is not null) return LastActivity ?? Activity.Now("");
+            // Automatic runs often find nothing to do; only answer a click (unless admin was needed).
+            if (reason is not null && !skippedAdmin) return LastActivity ?? Activity.Now("");
             text = "Nothing to revoke";
         }
         else if (revokedFor.Count == 0)
@@ -838,7 +988,7 @@ public sealed class Model
     }
 
     /// <summary>Stops and revokes everything for every watched app.</summary>
-    public Activity RevokeAll() => Revoke(Snapshot.Watched.Select(r => r.Client).ToList(), AllPanes, null, allowAdmin: true);
+    public Activity RevokeAll() => Revoke(Snapshot.Watched.Select(r => r.Client).ToList(), AllAccessPanes, null, allowAdmin: true);
 
     /// <summary>Stops every watched app, everything they started, and their services, as
     /// switching Running off does, and leaves the other switches as they are.</summary>
@@ -896,10 +1046,18 @@ public sealed class Model
             var running = own.Count > 0;
             if (running && row.HasWindow) watch.Opened = true;
             if (watch.WasRunning && !running && watch.Opened) quit.Add(row);
-            if (!running) watch.Opened = false;
+            if (!running)
+            {
+                watch.Opened = false;
+                limitRetry.Remove(row.Client);
+            }
             watch.WasRunning = running;
 
-            if (row.Deadline is { } deadline && deadline <= now) due.Add((row.Client, "its time limit ran out"));
+            if (row.Deadline is { } deadline && deadline <= now)
+            {
+                if (!limitRetry.TryGetValue(row.Client, out var retryAt) || retryAt <= now)
+                    due.Add((row.Client, "its time limit ran out"));
+            }
         }
 
         Activity? activity = KeepServicesStopped() ?? KeepServicesOnDemand();
@@ -910,7 +1068,36 @@ public sealed class Model
             var (n, _) = Processes.KillTree(orphans, self);
             if (n > 0) activity = LastActivity = Activity.Now($"Stopped {n} process{(n == 1 ? "" : "es")} a watched app left running when it quit");
         }
-        foreach (var (client, reason) in due) activity = Revoke([client], Automatic, reason, allowAdmin: false);
+
+        var expiredNetwork = localNetworkAllowances.Where(kv => kv.Value <= now).Select(kv => kv.Key).ToList();
+        if (expiredNetwork.Count > 0)
+        {
+            activity = Revoke(expiredNetwork, [Pane.Network], "its temporary access ran out", allowAdmin: false);
+            foreach (var client in expiredNetwork)
+            {
+                if (RowFor(client) is null || IsLocalNetworkBlocked(client)) localNetworkAllowances.Remove(client);
+                else localNetworkAllowances[client] = now.AddMinutes(5);
+            }
+        }
+
+        var expiredInternet = internetAllowances.Where(kv => kv.Value <= now).Select(kv => kv.Key).ToList();
+        if (expiredInternet.Count > 0)
+        {
+            activity = Revoke(expiredInternet, [Pane.Internet], "its temporary access ran out", allowAdmin: false);
+            foreach (var client in expiredInternet)
+            {
+                if (RowFor(client) is null || RowFor(client)?.IsOn(Pane.Internet) == false)
+                    internetAllowances.Remove(client);
+                else internetAllowances[client] = now.AddMinutes(5);
+            }
+        }
+
+        foreach (var (client, reason) in due)
+        {
+            activity = Revoke([client], Automatic, reason, allowAdmin: false);
+            if (reason == "its time limit ran out" && RowFor(client)?.Deadline is { } d && d <= now)
+                limitRetry[client] = now.AddMinutes(5);
+        }
         if (Settings.RevokeOnQuit)
         {
             foreach (var row in quit) activity = AppQuit(row) ?? activity;
@@ -1144,6 +1331,7 @@ public sealed class Model
         Pane.Camera => "Camera",
         Pane.Microphone => "Microphone",
         Pane.Location => "Location",
+        Pane.Internet => "Internet",
         _ => "Local network",
     };
 

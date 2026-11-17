@@ -48,6 +48,8 @@ public sealed class Settings
     /// <summary>Apps whose links and files Revoke asks about before they open them, by
     /// client key. Revoke takes them back whenever an app registers itself again.</summary>
     public HashSet<string> BlockLinks { get; set; } = [];
+    /// <summary>Hosts every limited app may reach besides its developer's own.</summary>
+    public List<string> ExtraInternetHosts { get; set; } = [];
     /// <summary>The time limit never counts from before it was switched on.</summary>
     public DateTimeOffset LimitStart { get; set; }
     /// <summary>Settings open by themselves only the first time, to set Revoke up.</summary>
@@ -73,8 +75,21 @@ public sealed class Settings
         {
             settings = new();
         }
-        if (!TimeLimits.Contains(settings.LimitMinutes)) settings.LimitMinutes = 30;
+        settings.RepairAfterLoad();
         return settings;
+    }
+
+    internal void RepairAfterLoad()
+    {
+        if (!TimeLimits.Contains(LimitMinutes)) LimitMinutes = 30;
+        Added ??= [];
+        Removed ??= [];
+        Hidden ??= [];
+        DisabledRules ??= [];
+        ServiceStarts ??= [];
+        KeepStopped = new HashSet<string>(KeepStopped ?? [], StringComparer.OrdinalIgnoreCase);
+        BlockLinks ??= [];
+        ExtraInternetHosts = InternetHosts.Parse(string.Join(',', ExtraInternetHosts ?? []));
     }
 
     public void Save()
@@ -121,8 +136,10 @@ public sealed class Settings
 
     public static string Describe(int minutes) => minutes switch
     {
+        1 => "1 minute",
         < 60 => $"{minutes} minutes",
         60 => "1 hour",
-        _ => $"{minutes / 60} hours",
+        _ when minutes % 60 == 0 => $"{minutes / 60} hours",
+        _ => $"{minutes / 60} {(minutes / 60 == 1 ? "hour" : "hours")} {minutes % 60} {(minutes % 60 == 1 ? "minute" : "minutes")}",
     };
 }

@@ -5,10 +5,17 @@ namespace Revoke.Core;
 /// <param name="Id">The rule's ID, which Set-NetFirewallRule -Name takes.</param>
 public sealed record FirewallRule(string Id, string Name, bool Inbound, bool Allow, bool Active, string? Program, string? Description, string? Group)
 {
+    public int? Protocol { get; init; }
     /// <summary>The client a rule Revoke added is for.</summary>
     public Client? RevokeClient =>
         Group == Firewall.Group && Description?.StartsWith(Firewall.DescriptionPrefix, StringComparison.Ordinal) == true
             ? Client.FromKey(Description[Firewall.DescriptionPrefix.Length..])
+            : null;
+
+    /// <summary>The client an internet-host allowlist rule Revoke added is for.</summary>
+    public Client? RevokeInternetClient =>
+        Group == Firewall.Group && Description?.StartsWith(Firewall.InternetDescriptionPrefix, StringComparison.Ordinal) == true
+            ? Client.FromKey(Description[Firewall.InternetDescriptionPrefix.Length..])
             : null;
 }
 
@@ -29,6 +36,7 @@ public static class Firewall
     /// <summary>Rules Revoke adds carry this group, and a description naming the client.</summary>
     public const string Group = "Revoke";
     public const string DescriptionPrefix = "revoke:";
+    public const string InternetDescriptionPrefix = "revoke-internet:";
 
     /// <summary>Private, link-local, multicast and broadcast addresses: the local network as
     /// macOS defines it. "LocalSubnet" is the firewall's name for the subnets this PC is
@@ -41,6 +49,12 @@ public static class Firewall
 
     /// <summary>Every port but DNS.</summary>
     public const string Ports = "1-52,54-65535";
+
+    /// <summary>Windows Firewall rules only accept fully-qualified .exe paths (not e.g. Inno Setup .tmp updaters).</summary>
+    public static bool IsExecutable(string? path) =>
+        !string.IsNullOrWhiteSpace(path) &&
+        Path.IsPathFullyQualified(path) &&
+        string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Tells when a rule in the local policy store is added, changed, or removed.</summary>
     public static RegistryWatch Watch() => new(Registry.LocalMachine, Rules, subtree: false);
@@ -71,6 +85,7 @@ public static class Firewall
                 "Action" => rule with { Allow = value == "Allow" },
                 "Active" => rule with { Active = value == "TRUE" },
                 "Dir" => rule with { Inbound = value == "In" },
+                "Protocol" when int.TryParse(value, out var protocol) => rule with { Protocol = protocol },
                 "App" => rule with { Program = Environment.ExpandEnvironmentVariables(value) },
                 "Name" => rule with { Name = value },
                 "Desc" => rule with { Description = value },

@@ -22,9 +22,10 @@ sealed record View(
     bool ServicesStartOnDemand,
     IReadOnlyList<KnownApp> Known,
     IReadOnlyList<KnownApp> Hidden,
-    bool LinksGuarded)
+    bool LinksGuarded,
+    string ExtraInternetHosts)
 {
-    public static readonly View Empty = new(Snapshot.Empty, null, false, true, false, false, 30, false, false, false, true, false, true, false, [], [], false);
+    public static readonly View Empty = new(Snapshot.Empty, null, false, true, false, false, 30, false, false, false, true, false, true, false, [], [], false, "");
 }
 
 /// <summary>
@@ -148,6 +149,80 @@ sealed class Controller
     /// <summary>The session locked or the PC is going to sleep.</summary>
     public Task LockedAsync(string reason) => Background(m => m.Locked(reason), wait: true);
 
+    public async Task<bool> RefreshAndCheckLocalNetworkBlockedAsync(IReadOnlyList<Client> clients, Client primary)
+    {
+        if (model is null) return false;
+        await gate.WaitAsync();
+        try
+        {
+            var (blocked, view) = await Task.Run(() =>
+            {
+                model.Refresh(force: true);
+                var anyBlocked = clients.Any(model.IsLocalNetworkBlocked) || model.IsLocalNetworkBlocked(primary);
+                return (anyBlocked, Capture(model));
+            });
+            Publish(view);
+            return blocked;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<bool> RefreshAndCheckInternetLimitedAsync(IReadOnlyList<Client> clients, Client primary)
+    {
+        if (model is null) return false;
+        await gate.WaitAsync();
+        try
+        {
+            var (limited, view) = await Task.Run(() =>
+            {
+                model.Refresh(force: true);
+                var anyLimited = clients.Any(model.IsInternetLimited) || model.IsInternetLimited(primary);
+                return (anyLimited, Capture(model));
+            });
+            Publish(view);
+            return limited;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<(bool Watched, string Name)> InspectClientAsync(Client client)
+    {
+        if (model is null) return (false, client.Key);
+        await gate.WaitAsync();
+        try
+        {
+            return await Task.Run(() =>
+            {
+                var row = model.RowFor(client);
+                var watched = row?.Watched ?? model.Settings.IsWatched(client, "");
+                var name = model.DisplayName(client);
+                return (watched, name);
+            });
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public Task<Activity?> AllowLocalNetworkTemporarilyAsync(IReadOnlyList<Client> clients, int minutes, string displayName) =>
+        ActAsync(m => m.AllowLocalNetworkTemporarily(clients, minutes, displayName));
+
+    public Task<Activity?> AllowInternetTemporarilyAsync(IReadOnlyList<Client> clients, int minutes, string displayName) =>
+        ActAsync(m => m.AllowInternetTemporarily(clients, minutes, displayName));
+
+    public Task<Activity?> OpenPrivacySettingsAsync(Pane pane, string displayName) =>
+        ActAsync(m => m.OpenPrivacySettings(pane, displayName));
+
+    public Task NoteAsync(string text, bool isError = false) =>
+        Background(m => m.Note(text, isError), wait: true);
+
     public Task ChangeSettingsAsync(Action<Settings> change) => Background(m =>
     {
         change(m.Settings);
@@ -204,7 +279,8 @@ sealed class Controller
         m.Settings.ServicesStartOnDemand,
         m.KnownApps(),
         m.HiddenApps(),
-        m.Settings.BlockLinks.Count > 0);
+        m.Settings.BlockLinks.Count > 0,
+        string.Join(", ", m.Settings.ExtraInternetHosts));
 
     void Publish(View view)
     {

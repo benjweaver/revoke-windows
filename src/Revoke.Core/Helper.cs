@@ -260,16 +260,26 @@ public sealed class HelperPolicy
         PublisherOf);
 
     /// <summary>Null if the helper may make the change, or why not.</summary>
-    public string? Check(ElevatedOp op) => op switch
+    public string? Check(ElevatedOp? op) => op switch
     {
         ElevatedOp.SetRuleEnabled { Enabled: false } r =>
-            rules.TryGetValue(r.Id, out var rule) && rule.Inbound && rule.Allow ? null : "only inbound allow rules can be switched off",
+            r.Id is not null && rules.TryGetValue(r.Id, out var rule) && rule.Inbound && rule.Allow
+                ? null : "only inbound allow rules can be switched off",
         ElevatedOp.SetRuleEnabled { Enabled: true } r =>
-            state.DisabledRules.Contains(r.Id) ? null : "only rules the helper switched off can be switched on",
+            r.Id is not null && state.DisabledRules.Contains(r.Id)
+                ? null : "only rules the helper switched off can be switched on",
         ElevatedOp.BlockLocalNetwork b =>
-            Path.IsPathFullyQualified(b.Program) && File.Exists(b.Program) && b.Label.Length <= 200 && b.ClientKey.Length <= 1000
+            Firewall.IsExecutable(b.Program) && File.Exists(b.Program)
+                && b.Label is { Length: <= 200 } && b.ClientKey is { Length: <= 1000 }
                 ? null : "not a program on this PC",
-        ElevatedOp.RemoveBlocks r => r.ClientKey.Length <= 1000 ? null : "not a client",
+        ElevatedOp.RemoveBlocks r => r.ClientKey is { Length: <= 1000 } ? null : "not a client",
+        ElevatedOp.BlockInternet b =>
+            Firewall.IsExecutable(b.Program) && File.Exists(b.Program)
+                && b.Label is { Length: <= 200 } && b.ClientKey is { Length: <= 1000 }
+                && b.Hosts is { Length: <= 200 } hosts
+                && hosts.All(h => h is { Length: <= 253 } && InternetHosts.Normalized(h) == h)
+                ? null : "not a program on this PC",
+        ElevatedOp.RemoveInternetBlocks r => r.ClientKey is { Length: <= 1000 } ? null : "not a client",
         ElevatedOp.StopService s => WatchedService(s.Name),
         ElevatedOp.SetServiceStart s => WatchedService(s.Name)
             ?? (s.Start == 3 || (state.ServiceStarts.TryGetValue(s.Name, out var original) && original == s.Start)
@@ -278,11 +288,12 @@ public sealed class HelperPolicy
         _ => "the helper doesn't do that",
     };
 
-    string? WatchedService(string name) =>
-        services.TryGetValue(name, out var service) && Watched(service.Program) ? null : "not a watched developer's service";
+    string? WatchedService(string? name) =>
+        name is not null && services.TryGetValue(name, out var service) && Watched(service.Program)
+            ? null : "not a watched developer's service";
 
     string? MachineStartup(ElevatedOp.SetMachineStartup m) =>
-        machineStartup.TryGetValue((m.Wow64, m.Name), out var program) && Watched(program)
+        m.Name is not null && machineStartup.TryGetValue((m.Wow64, m.Name), out var program) && Watched(program)
             ? null : "not a watched developer's startup entry";
 
     bool Watched(string program) => Settings.WatchedByDefault(Client.FromPath(program), publisherOf(program) ?? "");

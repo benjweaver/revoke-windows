@@ -50,6 +50,10 @@ public sealed partial class SettingsWindow : Window
         RevokeOnClose.IsOn = view.RevokeOnClose;
         RevokeOnQuit.IsOn = view.RevokeOnQuit;
         GiveLinksBack.IsEnabled = view.LinksGuarded && !view.Busy;
+        if (ExtraInternetHosts.FocusState == FocusState.Unfocused && ExtraInternetHosts.Text != view.ExtraInternetHosts)
+        {
+            ExtraInternetHosts.Text = view.ExtraInternetHosts;
+        }
         RevokeAfterLimit.IsOn = view.RevokeAfterLimit;
         RevokeOnLock.IsOn = view.RevokeOnLock;
         LaunchAtLogin.IsOn = view.LaunchAtLogin;
@@ -213,6 +217,29 @@ public sealed partial class SettingsWindow : Window
     }
 
     async void GiveLinksBack_Click(object sender, RoutedEventArgs e) => await controller.ActAsync(m => m.GiveAllLinksBack());
+
+    async void ExtraInternetHosts_LostFocus(object sender, RoutedEventArgs e) => await SaveExtraInternetHostsAsync();
+
+    async void ExtraInternetHosts_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            await SaveExtraInternetHostsAsync();
+        }
+    }
+
+    async Task SaveExtraInternetHostsAsync()
+    {
+        if (updating) return;
+        var parsed = InternetHosts.Parse(ExtraInternetHosts.Text);
+        var formatted = string.Join(", ", parsed);
+        updating = true;
+        if (ExtraInternetHosts.Text != formatted) ExtraInternetHosts.Text = formatted;
+        updating = false;
+        if (formatted == controller.View.ExtraInternetHosts) return;
+        await controller.ChangeSettingsAsync(settings => settings.ExtraInternetHosts = parsed);
+    }
 
     void Quit_Click(object sender, RoutedEventArgs e) => App.Current.Quit();
 

@@ -29,11 +29,12 @@ public sealed partial class PanelWindow : Window
         (Pane.Startup, "\uE7E8", "Startup", "Opens when you sign in, as in Task Manager's Startup apps"),
         (Pane.Service, "\uE90F", "Service", "A Windows service the app installed, running or starting with Windows"),
         (Pane.Links, "\uE71B", "Links", "Links and files that open the app, from web pages, documents, and other apps. Off, Revoke asks you first"),
-        (Pane.Screen, "\uE7F4", "Screen", "Screen capture (Settings › Privacy & security › Screenshots and apps)"),
+        (Pane.Screen, "\uE7F4", "Screen", "Screen capture (Settings â€º Privacy & security â€º Screenshots and apps)"),
         (Pane.Camera, "\uE714", "Camera", "Camera"),
         (Pane.Microphone, "\uE720", "Mic", "Microphone"),
         (Pane.Location, "\uE707", "Location", "Location"),
         (Pane.Network, "\uE968", "Network", "Local network: devices on your network connecting to it, and it connecting to them"),
+        (Pane.Internet, "\uE774", "Internet", "Internet: lets the app reach anywhere on the internet. Off, Revoke blocks public TCP and UDP addresses except those resolved for its provider's hosts and hosts added in Settings. DNS and other protocols remain open."),
     ];
 
     readonly Controller controller;
@@ -187,7 +188,7 @@ public sealed partial class PanelWindow : Window
         }
         RevokeAll.IsEnabled = EndAll.IsEnabled = !view.Busy;
         Spinner.IsActive = view.Busy;
-        Activity.Text = view.Activity is { Text.Length: > 0 } a ? $"{a.At:t} · {a.Text}" : "";
+        Activity.Text = view.Activity is { Text.Length: > 0 } a ? $"{a.At:t} Â· {a.Text}" : "";
         Activity.Style = Find(view.Activity?.IsError == true ? "ActivityError" : "Activity");
         SetTip(Activity, Activity.Text);
         Footnote.Text = "Switching camera, microphone, location, or screen capture on opens Settings, because only you can grant access there."
@@ -274,7 +275,7 @@ public sealed partial class PanelWindow : Window
             Columns.Children.Add(stack);
         }
         var accessTitle = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Spacing = 2, Opacity = 0.7 };
-        // A single 16 × 14 icon: two stacked switches, with opposing knobs.
+        // A single 16 Ã— 14 icon: two stacked switches, with opposing knobs.
         // PathIcon inherits the same foreground and theme behavior as the other icons.
         var switches = new PathIcon
         {
@@ -463,7 +464,7 @@ public sealed partial class PanelWindow : Window
             content.Children.Add(new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
-                Text = string.Join("\n", services.Select(s => $"• {s.Service} ({s.App})")),
+                Text = string.Join("\n", services.Select(s => $"â€¢ {s.Service} ({s.App})")),
             });
         }
         var dontAsk = new CheckBox { Content = "Don't ask again" };
@@ -582,7 +583,7 @@ public sealed partial class PanelWindow : Window
         }
 
         /// <summary>What the app is, when its name doesn't say, then how it's running.</summary>
-        static string Detail(Row row) => row.Role is { } role ? $"{role} · {Status(row)}" : Status(row);
+        static string Detail(Row row) => row.Role is { } role ? $"{role} Â· {Status(row)}" : Status(row);
 
         static string Status(Row row)
         {
@@ -614,7 +615,7 @@ public sealed partial class PanelWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        readonly TextBlock dash = new() { Text = "–", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        readonly TextBlock dash = new() { Text = "â€“", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         // Using it right now: camera, microphone, location, or screen capture.
         readonly Ellipse live = new()
         {

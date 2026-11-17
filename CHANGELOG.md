@@ -7,6 +7,29 @@ from its section below.
 
 ## [Unreleased]
 
+### Added
+
+- An Internet switch limits a watched app's outbound TCP and UDP connections to its
+  provider's resolved hosts and any extra hosts in Settings. Apps without provider
+  hosts have no public TCP or UDP access except DNS when switched off.
+- Apps and agents can ask for temporary local network or Internet access, or ask to
+  open privacy settings, through `Revoke.exe --request` or `revoke://request`.
+  Revoke shows a confirmation prompt and identifies the requesting app where possible.
+
+### Fixed
+
+- Firewall rules skip temporary updater programs that do not end in `.exe`.
+- Internet host resolution no longer reads Windows' DNS cache through an undocumented
+  native API. Add any uncommon provider hosts explicitly in Settings.
+- Access requests and helper calls now bound incoming lines and time out stalled
+  senders. Temporary grants keep retrying after their deadline if the helper cannot
+  restore a block at that moment.
+- Malformed saved settings with null collections no longer prevent Revoke from starting.
+- Internet status checks account for disabled and incomplete firewall rules, and
+  failed grants no longer report success to the requester.
+- All Access and Revoke all watched include the Internet column, so an app cannot
+  keep unrestricted public connectivity after either action.
+
 ## [0.4.1] - 2026-10-25
 
 ### Fixed
