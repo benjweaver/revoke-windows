@@ -14,7 +14,7 @@ built natively with WinUI 3.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/revoke-windows-grid-dark.png">
-    <img src="docs/screenshots/revoke-windows-grid.png" width="581" alt="Revoke for Windows' panel: ChatGPT, Claude, and GitHub Copilot are watched, with switches for Running, Startup, Service, Links, Screen, Camera, Mic, Location, and Network.">
+    <img src="docs/screenshots/revoke-windows-grid.png" width="581" alt="Revoke's panel with watched apps and switches for Network, Internet, and All Access.">
   </picture>
 </p>
 <p align="center">
@@ -331,8 +331,40 @@ on a PC without either installed. Building the app also publishes the helper
 (`src/Revoke.Helper`) beside it as one file, `Helper\RevokeHelper.exe`.
 `scripts/make-icons.py` redraws the tray icons.
 
-The tests only read your PC, except for stopping processes they start themselves and
+The `dotnet test` checks only read your PC, except for stopping processes they start themselves and
 adding, then removing, made-up link schemes of their own in your part of the registry.
+
+## Windows VM integration tests
+
+With an Aviary-managed Windows VM running, signed in, and configured for Aviary SSH:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\vm-test.ps1 -UpdateScreenshots
+```
+
+The script selects the one running, SSH-ready Windows VM. If there are several, pass
+its Aviary ID with `-Machine`. It publishes this checkout and a self-contained probe,
+copies them into the guest, and runs the checks in the signed-in desktop session. An
+out-of-date admin helper opens the VM's UAC prompt for you to approve. The suite checks
+the provider host allowlist, the no-host VSCodium policy, local-network firewall rules,
+new executable paths after an update, a `.tmp` updater, a declined `revoke://request`,
+and a one-minute `--request` grant and its expiry. Installed app checks report a skip
+when that app is absent; authenticated model calls still need a signed-in person to try
+them. Windows Firewall cannot attach a path rule to an updater running as `.tmp`, so
+that process's own connections remain outside the block.
+
+The guest runner restores the switches it changes and the VM's theme. Reports and
+cropped screenshots go under `publish/vm-test/results/`. `-UpdateScreenshots` copies
+the passing run's panel and access-request captures into `docs/screenshots/`. These
+images show the suite's test programs, not installed provider apps. A passing default
+run removes its staged files from the VM; a failed run keeps them for diagnosis.
+The [light](docs/screenshots/revoke-windows-vm-test-grid.png) and
+[dark](docs/screenshots/revoke-windows-vm-test-grid-dark.png) fixture captures remain
+available after release screenshots are retaken.
+
+<p align="center">
+  <img src="docs/screenshots/revoke-windows-access-request.png" width="414" alt="Revoke's VM test access-request prompt naming an unverified antigravityprobe requester, with No focused and Yes beside it.">
+</p>
 
 ## Support
 
@@ -346,9 +378,10 @@ app, zips it with a `SHA256SUMS` file, and publishes a GitHub release with that
 changelog section as its notes, which the install script then finds. It needs the
 GitHub CLI, signed in.
 
-After a release, `scripts/screenshots.sh` on the Mac retakes the README's screenshots
-from the latest release, in the Windows 11 VM. Commit the changed `docs/screenshots`
-afterward.
+After a release, `scripts/screenshots.sh` on the Mac retakes the README's main panel
+and link-prompt screenshots with installed apps from the latest release, in the
+Windows 11 VM. The Windows VM suite above captures the branch build and its access
+request prompt. Commit the changed `docs/screenshots` afterward.
 
 ## License
 

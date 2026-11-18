@@ -95,6 +95,17 @@ public sealed partial class PanelWindow : Window
             Hide();
             return;
         }
+        Show(iconRect, keyboard);
+    }
+
+    /// <summary>Opens the panel for commands that request it regardless of its current state.</summary>
+    internal void Show(TrayIcon.RECT iconRect, bool keyboard)
+    {
+        if (IsShown)
+        {
+            Activate();
+            return;
+        }
         if (DateTime.UtcNow - hiddenAt < TimeSpan.FromMilliseconds(300)) return;
         anchor = iconRect;
         Place();

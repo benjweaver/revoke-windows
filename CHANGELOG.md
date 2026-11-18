@@ -15,6 +15,9 @@ from its section below.
 - Apps and agents can ask for temporary local network or Internet access, or ask to
   open privacy settings, through `Revoke.exe --request` or `revoke://request`.
   Revoke shows a confirmation prompt and identifies the requesting app where possible.
+- A Windows VM integration suite exercises live firewall rules, app-version changes,
+  access requests, temporary grants, and their expiry, and captures panel and prompt
+  screenshots for review.
 
 ### Fixed
 
@@ -34,6 +37,9 @@ from its section below.
   failed grants no longer report success to the requester.
 - All Access and Revoke all watched include the Internet column, so an app cannot
   keep unrestricted public connectivity after either action.
+- A repackaged build no longer marks an identical installed admin helper as outdated
+  because ZIP extraction changed its file timestamp. Automatic firewall repair now
+  checks the helper's content identity.
 
 ## [0.4.1] - 2026-10-25
 

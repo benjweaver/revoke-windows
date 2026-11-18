@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>RevokeVmProbe</AssemblyName>
+    <RootNamespace>Revoke.VmProbe</RootNamespace>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <!-- Fixture copies use their executable file names as distinct Revoke row names. -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- This fixture has no NuGet packages; an offline VM build needs no audit feed. -->
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+</Project>

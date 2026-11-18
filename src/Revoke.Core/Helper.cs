@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Security.Cryptography;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
@@ -26,6 +27,10 @@ public sealed record HelperReply(string? Error, List<int> Rejected);
 /// </summary>
 public static unsafe partial class Helper
 {
+    readonly record struct BinaryStamp(string Path, long Length, DateTime Modified);
+    static readonly object currentLock = new();
+    static (BinaryStamp Installed, BinaryStamp Bundled, bool Match)? currentCache;
+
     public const string ServiceName = "RevokeHelper";
     public const string PipeName = "dev.benjweaver.Revoke.Helper";
 
@@ -75,15 +80,36 @@ public static unsafe partial class Helper
         }
     }
 
-    /// <summary>Whether the installed helper is the one beside Revoke.exe. Installing copies
-    /// it, keeping its size and modified time.</summary>
-    public static bool IsCurrent
+    /// <summary>Whether the installed helper has the same content as the one beside Revoke.exe.
+    /// Packaging can change file timestamps without changing the binary. File metadata keys
+    /// the hash cache so the periodic repair check does not reread both files every tick.</summary>
+    public static bool IsCurrent => SameBinary(InstallPath, BundledPath);
+
+    internal static bool SameBinary(string installedPath, string bundledPath)
     {
-        get
+        var installed = new FileInfo(installedPath);
+        var bundled = new FileInfo(bundledPath);
+        if (!bundled.Exists) return true;
+        if (!installed.Exists || installed.Length != bundled.Length) return false;
+        var installedStamp = new BinaryStamp(installed.FullName, installed.Length, installed.LastWriteTimeUtc);
+        var bundledStamp = new BinaryStamp(bundled.FullName, bundled.Length, bundled.LastWriteTimeUtc);
+        lock (currentLock)
         {
-            var (installed, bundled) = (new FileInfo(InstallPath), new FileInfo(BundledPath));
-            return !bundled.Exists || (installed.Exists && installed.Length == bundled.Length
-                && installed.LastWriteTimeUtc == bundled.LastWriteTimeUtc);
+            if (currentCache is { } cached && cached.Installed == installedStamp && cached.Bundled == bundledStamp)
+                return cached.Match;
+            try
+            {
+                using var installedFile = installed.OpenRead();
+                using var bundledFile = bundled.OpenRead();
+                var match = SHA256.HashData(installedFile).AsSpan().SequenceEqual(SHA256.HashData(bundledFile));
+                currentCache = (installedStamp, bundledStamp, match);
+                return match;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // A transient read failure should be retried on the next repair tick.
+                return false;
+            }
         }
     }
 

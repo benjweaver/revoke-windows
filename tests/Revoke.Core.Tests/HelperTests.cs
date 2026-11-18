@@ -10,6 +10,30 @@ public class HelperTests
     const string Claude = @"C:\Program Files\WindowsApps\Claude_2.16120.0.0_x64__pzs8sxrjxfjjc\app\resources\cowork-svc.exe";
     const string Backup = @"C:\Program Files\Backup\agent.exe";
 
+    [Fact]
+    public void MatchesInstalledHelperByContentAcrossPackagingTimestamps()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "revoke-helper-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var installed = Path.Combine(directory, "installed.exe");
+        var bundled = Path.Combine(directory, "bundled.exe");
+        try
+        {
+            File.WriteAllBytes(installed, [1, 2, 3]);
+            File.WriteAllBytes(bundled, [1, 2, 3]);
+            File.SetLastWriteTimeUtc(bundled, DateTime.UtcNow.AddDays(-1));
+            Assert.True(Helper.SameBinary(installed, bundled));
+
+            File.WriteAllBytes(bundled, [1, 2, 4]);
+            File.SetLastWriteTimeUtc(bundled, DateTime.UtcNow.AddDays(-2));
+            Assert.False(Helper.SameBinary(installed, bundled));
+
+            File.SetLastWriteTimeUtc(bundled, File.GetLastWriteTimeUtc(installed));
+            Assert.False(Helper.SameBinary(installed, bundled));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     static HelperPolicy Policy(HelperState? state = null) => new(
         [
             new FirewallRule("{in-allow}", "Claude", Inbound: true, Allow: true, Active: true, Claude, null, null),

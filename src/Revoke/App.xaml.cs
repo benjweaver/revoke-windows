@@ -15,6 +15,8 @@ public partial class App : Application
 
     Mutex? instance;
     EventWaitHandle? showSettings;
+    EventWaitHandle? showPanel;
+    bool panelRequested;
     TrayIcon? tray;
     Controller? controller;
     AccessRequestServer? requestServer;
@@ -139,10 +141,19 @@ public partial class App : Application
         }
         var ui = DispatcherQueue.GetForCurrentThread();
         showSettings = new EventWaitHandle(false, EventResetMode.AutoReset, InstanceName + ".show");
+        showPanel = new EventWaitHandle(false, EventResetMode.AutoReset, InstanceName + ".panel");
         new Thread(() =>
         {
             while (showSettings.WaitOne()) ui.TryEnqueue(ShowSettings);
         }) { IsBackground = true, Name = "Revoke single instance" }.Start();
+        new Thread(() =>
+        {
+            while (showPanel.WaitOne()) ui.TryEnqueue(() =>
+            {
+                if (panel is null) panelRequested = true;
+                else if (tray is not null) panel.Show(tray.Bounds, keyboard: true);
+            });
+        }) { IsBackground = true, Name = "Revoke panel request" }.Start();
 
         controller = new Controller(ui);
         tray = new TrayIcon();
@@ -164,6 +175,7 @@ public partial class App : Application
         AccessRequest.TryRegisterProtocol();
         requestServer = new AccessRequestServer(controller, ui);
         panel = new PanelWindow(controller);
+        if (panelRequested) panel.Show(tray.Bounds, keyboard: true);
         // Settings open by themselves only the first time, to set Revoke up.
         var background = command.Contains("--background");
         if (controller.FirstRun && !background) ShowSettings();
