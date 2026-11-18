@@ -50,7 +50,11 @@ $dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
 if (-not $dotnet) { $dotnet = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe' }
 $dist = Join-Path $repo 'dist'
 $stage = Join-Path $dist 'Revoke'
-Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
+if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($dist)) -ne
+    [IO.Path]::GetFullPath($repo)) { throw 'Release output escaped the repository.' }
+if ((Get-Item -LiteralPath $dist -Force -ErrorAction SilentlyContinue).Attributes -band
+    [IO.FileAttributes]::ReparsePoint) { throw 'Release output is a reparse point.' }
+Remove-Item -LiteralPath $dist -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Building Revoke $version..."
 # The app publishes the helper from inside its build, which doesn't restore it.
@@ -86,6 +90,6 @@ try {
 finally {
     Pop-Location
 }
-Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $dist -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Released $tag"
 Write-Host "On the Mac, run scripts/screenshots.sh to retake the README screenshots from $tag, then commit docs/screenshots."

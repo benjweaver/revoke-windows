@@ -7,6 +7,8 @@ from its section below.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-18
+
 ### Added
 
 - An Internet switch limits a watched app's outbound TCP and UDP connections to its
@@ -40,6 +42,8 @@ from its section below.
 - A repackaged build no longer marks an identical installed admin helper as outdated
   because ZIP extraction changed its file timestamp. Automatic firewall repair now
   checks the helper's content identity.
+- Installing a checkout no longer deletes VM test reports or copies test artifacts
+  into the app's install folder.
 
 ## [0.4.1] - 2026-10-25
 
@@ -257,6 +261,7 @@ from its section below.
 - Apps signed by Anthropic and OpenAI are watched by default.
 - A one-line install, update and uninstall in PowerShell.
 
+[0.5.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.5.0
 [0.4.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.4.1
 [0.4.0]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.4.0
 [0.3.1]: https://github.com/benjweaver/revoke-windows/releases/tag/v0.3.1
