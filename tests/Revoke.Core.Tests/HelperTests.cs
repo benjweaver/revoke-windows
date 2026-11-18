@@ -10,6 +10,30 @@ public class HelperTests
     const string Claude = @"C:\Program Files\WindowsApps\Claude_2.16120.0.0_x64__pzs8sxrjxfjjc\app\resources\cowork-svc.exe";
     const string Backup = @"C:\Program Files\Backup\agent.exe";
 
+    [Fact]
+    public void MatchesInstalledHelperByContentAcrossPackagingTimestamps()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "revoke-helper-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var installed = Path.Combine(directory, "installed.exe");
+        var bundled = Path.Combine(directory, "bundled.exe");
+        try
+        {
+            File.WriteAllBytes(installed, [1, 2, 3]);
+            File.WriteAllBytes(bundled, [1, 2, 3]);
+            File.SetLastWriteTimeUtc(bundled, DateTime.UtcNow.AddDays(-1));
+            Assert.True(Helper.SameBinary(installed, bundled));
+
+            File.WriteAllBytes(bundled, [1, 2, 4]);
+            File.SetLastWriteTimeUtc(bundled, DateTime.UtcNow.AddDays(-2));
+            Assert.False(Helper.SameBinary(installed, bundled));
+
+            File.SetLastWriteTimeUtc(bundled, File.GetLastWriteTimeUtc(installed));
+            Assert.False(Helper.SameBinary(installed, bundled));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     static HelperPolicy Policy(HelperState? state = null) => new(
         [
             new FirewallRule("{in-allow}", "Claude", Inbound: true, Allow: true, Active: true, Claude, null, null),
@@ -70,7 +94,26 @@ public class HelperTests
         Assert.Null(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", notepad)));
         Assert.NotNull(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", @"C:\nowhere\x.exe")));
         Assert.NotNull(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", "relative.exe")));
+        var tempUpdater = Path.Combine(Path.GetTempPath(), $"revoke-updater-{Guid.NewGuid():N}.tmp");
+        File.WriteAllBytes(tempUpdater, []);
+        try
+        {
+            Assert.NotNull(Policy().Check(new ElevatedOp.BlockLocalNetwork("exe:x", "X", tempUpdater)));
+            Assert.NotNull(Policy().Check(new ElevatedOp.BlockInternet("exe:x", "X", tempUpdater, [])));
+        }
+        finally { File.Delete(tempUpdater); }
         Assert.Null(Policy().Check(new ElevatedOp.RemoveBlocks("pkg:Claude_pzs8sxrjxfjjc")));
+    }
+
+    [Fact]
+    public void RejectsMalformedPipeOperationsWithoutThrowing()
+    {
+        var policy = Policy();
+        var malformed = JsonSerializer.Deserialize<HelperRequest>(
+            """{"ops":[{"op":"blockInternet","clientKey":"exe:x","label":"X","program":"C:\\Windows\\notepad.exe","hosts":null},{"op":"removeBlocks","clientKey":null},null]}""",
+            Helper.Json);
+        Assert.NotNull(malformed);
+        Assert.All(malformed.Ops, op => Assert.NotNull(policy.Check(op)));
     }
 
     [Fact]
@@ -111,7 +154,7 @@ public class HelperTests
             new ElevatedOp.StopService("CoworkVMService"),
             new ElevatedOp.SetServiceStart("CoworkVMService", 3),
             new ElevatedOp.SetRuleEnabled("{in-allow}", false),
-            new ElevatedOp.BlockLocalNetwork("pkg:A_b", "Ben\u2019s app", @"C:\a.exe"),
+            new ElevatedOp.BlockLocalNetwork("pkg:A_b", "Sample app", @"C:\a.exe"),
             new ElevatedOp.RemoveBlocks("pkg:A_b"),
             new ElevatedOp.SetMachineStartup(true, "Claude", true),
         ];

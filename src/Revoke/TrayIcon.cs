@@ -112,6 +112,8 @@ sealed unsafe partial class TrayIcon : IDisposable
         return new RECT { left = point.x, top = point.y, right = point.x, bottom = point.y };
     }
 
+    public RECT Bounds => IconRect();
+
     static bool PointerOver(RECT rect) =>
         GetCursorPos(out var point) && point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
 

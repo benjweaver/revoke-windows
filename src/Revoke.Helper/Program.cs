@@ -134,10 +134,12 @@ sealed class HelperService : ServiceBase
     {
         using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-        var line = await reader.ReadLineAsync(token);
-        if (line is null || line.Length > MaxRequest) return;
+        using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        readDeadline.CancelAfter(TimeSpan.FromSeconds(5));
+        var line = await BoundedLine.ReadAsync(reader, MaxRequest, readDeadline.Token);
+        if (line is null) return;
         var request = JsonSerializer.Deserialize<HelperRequest>(line, Helper.Json);
-        var reply = request is null ? new HelperReply("Empty request.", []) : Handle(request.Ops);
+        var reply = request?.Ops is null ? new HelperReply("Empty request.", []) : Handle(request.Ops);
         await writer.WriteLineAsync(JsonSerializer.Serialize(reply, Helper.Json).AsMemory(), token);
     }
 

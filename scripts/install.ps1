@@ -15,14 +15,19 @@ $ProgressPreference = 'SilentlyContinue'
 $repo = Split-Path -Parent $PSScriptRoot
 $dir = Join-Path $env:LOCALAPPDATA 'Programs\Revoke'
 $exe = Join-Path $dir 'Revoke.exe'
-$publish = Join-Path $repo 'publish'
+$publishRoot = Join-Path $repo 'publish'
+$publish = Join-Path $publishRoot 'install'
+if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($publish)) -ne
+    [IO.Path]::GetFullPath($publishRoot)) { throw 'Install output escaped the publish directory.' }
+if ((Get-Item -LiteralPath $publish -Force -ErrorAction SilentlyContinue).Attributes -band
+    [IO.FileAttributes]::ReparsePoint) { throw 'Install output is a reparse point.' }
 
 $dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
 if (-not $dotnet) { $dotnet = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe' }
 if (-not (Test-Path $dotnet)) { throw 'Building Revoke needs the .NET 10 SDK: winget install Microsoft.DotNet.SDK.10' }
 
 Write-Host 'Building a release...'
-Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $publish -Recurse -Force -ErrorAction SilentlyContinue
 # The app publishes the helper beside it from inside its build, which doesn't restore the
 # helper's packages, so a fresh checkout has to restore it first.
 & $dotnet restore (Join-Path $repo 'src\Revoke.Helper') --nologo -v quiet
@@ -46,7 +51,7 @@ robocopy $publish $dir /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "Copying the build failed (robocopy exit code $LASTEXITCODE)." }
 # Below 8, robocopy is saying what it copied, not failing; don't pass that on as an exit code.
 $global:LASTEXITCODE = 0
-Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $publish -Recurse -Force -ErrorAction SilentlyContinue
 
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Revoke.lnk'
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)

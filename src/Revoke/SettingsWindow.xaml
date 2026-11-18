@@ -91,6 +91,20 @@
         <TextBlock Style="{StaticResource Footer}" Text="Web pages, emails, and documents can open an agent with a link (claude://, codex://, claude-cli://) or a file (.skill), carrying instructions for it, even while it's stopped. Switch an app's Links off in the panel and Windows opens Revoke instead, which shows you the link and opens the app only if you say yes." />
       </StackPanel>
 
+      <StackPanel Spacing="4">
+        <TextBlock Text="Internet" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
+        <Grid Style="{StaticResource Card}">
+          <StackPanel VerticalAlignment="Center" Spacing="8">
+            <StackPanel>
+              <TextBlock Text="Extra allowed hosts" />
+              <TextBlock Style="{StaticResource Hint}" Text="Domains every limited app may still reach alongside its model provider's own hosts, separated by commas or spaces." />
+            </StackPanel>
+            <TextBox x:Name="ExtraInternetHosts" PlaceholderText="api.example.com, internal.corp" LostFocus="ExtraInternetHosts_LostFocus" KeyDown="ExtraInternetHosts_KeyDown" AutomationProperties.Name="Extra allowed hosts" />
+          </StackPanel>
+        </Grid>
+        <TextBlock Style="{StaticResource Footer}" Text="Changes here apply the next time you switch an app's Internet off. Windows Firewall filters TCP and UDP by resolved IP address, so shared CDNs may overlap. DNS and other protocols stay open." />
+      </StackPanel>
+
       <StackPanel x:Name="HiddenSection" Spacing="4" Visibility="Collapsed">
         <TextBlock Text="Hidden apps" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
         <StackPanel x:Name="Hidden" Spacing="4" />

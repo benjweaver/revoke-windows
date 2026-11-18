@@ -55,10 +55,13 @@ public sealed record Client(ClientKind Kind, string Id) : IComparable<Client>
     /// </summary>
     public static string? FamilyFromInstallPath(string path)
     {
-        const string marker = @"\windowsapps\";
-        var start = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (start < 0) return null;
-        var folder = path[(start + marker.Length)..].Split('\\')[0];
+        if (!Path.IsPathFullyQualified(path)) return null;
+        var programFiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps") + "\\";
+        var driveRoot = Path.Combine(Path.GetPathRoot(path)!, "WindowsApps") + "\\";
+        var root = new[] { programFiles, driveRoot }
+            .FirstOrDefault(candidate => path.StartsWith(candidate, StringComparison.OrdinalIgnoreCase));
+        if (root is null) return null;
+        var folder = path[root.Length..].Split('\\')[0];
         var parts = folder.Split('_');
         return parts.Length == 5 ? $"{parts[0]}_{parts[4]}" : null;
     }

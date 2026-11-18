@@ -13,6 +13,8 @@ namespace Revoke.Core;
 [JsonDerivedType(typeof(SetRuleEnabled), "setRuleEnabled")]
 [JsonDerivedType(typeof(BlockLocalNetwork), "blockLocalNetwork")]
 [JsonDerivedType(typeof(RemoveBlocks), "removeBlocks")]
+[JsonDerivedType(typeof(BlockInternet), "blockInternet")]
+[JsonDerivedType(typeof(RemoveInternetBlocks), "removeInternetBlocks")]
 [JsonDerivedType(typeof(SetMachineStartup), "setMachineStartup")]
 public abstract record ElevatedOp
 {
@@ -21,8 +23,12 @@ public abstract record ElevatedOp
     public sealed record SetRuleEnabled(string Id, bool Enabled) : ElevatedOp;
     /// <summary>Keeps one program off the local network, over TCP and UDP.</summary>
     public sealed record BlockLocalNetwork(string ClientKey, string Label, string Program) : ElevatedOp;
-    /// <summary>Removes every rule Revoke added for a client.</summary>
+    /// <summary>Removes every local-network rule Revoke added for a client.</summary>
     public sealed record RemoveBlocks(string ClientKey) : ElevatedOp;
+    /// <summary>Keeps one program from reaching internet hosts outside its allowlist, over TCP and UDP.</summary>
+    public sealed record BlockInternet(string ClientKey, string Label, string Program, string[] Hosts) : ElevatedOp;
+    /// <summary>Removes every internet-host allowlist rule Revoke added for a client.</summary>
+    public sealed record RemoveInternetBlocks(string ClientKey) : ElevatedOp;
     /// <summary>Switches a machine-wide Run value on or off, the way Settings › Apps › Startup does.</summary>
     public sealed record SetMachineStartup(bool Wow64, string Name, bool Enabled) : ElevatedOp;
 }
@@ -37,15 +43,17 @@ public static class Elevated
 {
     public static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public static string Describe(ElevatedOp op) => op switch
+    public static string Describe(ElevatedOp? op) => op switch
     {
         ElevatedOp.StopService s => $"Stop {s.Name}",
         ElevatedOp.SetServiceStart s => $"Set {s.Name} to {Service.StartName(s.Start)}",
         ElevatedOp.SetRuleEnabled r => $"{(r.Enabled ? "Enable" : "Disable")} rule {r.Id}",
         ElevatedOp.BlockLocalNetwork b => $"Block {b.Program}",
         ElevatedOp.RemoveBlocks r => $"Unblock {r.ClientKey}",
+        ElevatedOp.BlockInternet b => $"Block internet for {b.Program}",
+        ElevatedOp.RemoveInternetBlocks r => $"Unblock internet for {r.ClientKey}",
         ElevatedOp.SetMachineStartup m => $"{(m.Enabled ? "Enable" : "Disable")} startup {m.Name}",
-        _ => op.ToString(),
+        _ => op?.ToString() ?? "Invalid change",
     };
 
     /// <summary>Makes the changes: through the helper service, if it's installed and allows

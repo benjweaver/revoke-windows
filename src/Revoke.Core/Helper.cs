@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Security.Cryptography;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
@@ -26,6 +27,10 @@ public sealed record HelperReply(string? Error, List<int> Rejected);
 /// </summary>
 public static unsafe partial class Helper
 {
+    readonly record struct BinaryStamp(string Path, long Length, DateTime Modified);
+    static readonly object currentLock = new();
+    static (BinaryStamp Installed, BinaryStamp Bundled, bool Match)? currentCache;
+
     public const string ServiceName = "RevokeHelper";
     public const string PipeName = "dev.benjweaver.Revoke.Helper";
 
@@ -75,15 +80,36 @@ public static unsafe partial class Helper
         }
     }
 
-    /// <summary>Whether the installed helper is the one beside Revoke.exe. Installing copies
-    /// it, keeping its size and modified time.</summary>
-    public static bool IsCurrent
+    /// <summary>Whether the installed helper has the same content as the one beside Revoke.exe.
+    /// Packaging can change file timestamps without changing the binary. File metadata keys
+    /// the hash cache so the periodic repair check does not reread both files every tick.</summary>
+    public static bool IsCurrent => SameBinary(InstallPath, BundledPath);
+
+    internal static bool SameBinary(string installedPath, string bundledPath)
     {
-        get
+        var installed = new FileInfo(installedPath);
+        var bundled = new FileInfo(bundledPath);
+        if (!bundled.Exists) return true;
+        if (!installed.Exists || installed.Length != bundled.Length) return false;
+        var installedStamp = new BinaryStamp(installed.FullName, installed.Length, installed.LastWriteTimeUtc);
+        var bundledStamp = new BinaryStamp(bundled.FullName, bundled.Length, bundled.LastWriteTimeUtc);
+        lock (currentLock)
         {
-            var (installed, bundled) = (new FileInfo(InstallPath), new FileInfo(BundledPath));
-            return !bundled.Exists || (installed.Exists && installed.Length == bundled.Length
-                && installed.LastWriteTimeUtc == bundled.LastWriteTimeUtc);
+            if (currentCache is { } cached && cached.Installed == installedStamp && cached.Bundled == bundledStamp)
+                return cached.Match;
+            try
+            {
+                using var installedFile = installed.OpenRead();
+                using var bundledFile = bundled.OpenRead();
+                var match = SHA256.HashData(installedFile).AsSpan().SequenceEqual(SHA256.HashData(bundledFile));
+                currentCache = (installedStamp, bundledStamp, match);
+                return match;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // A transient read failure should be retried on the next repair tick.
+                return false;
+            }
         }
     }
 
@@ -260,16 +286,26 @@ public sealed class HelperPolicy
         PublisherOf);
 
     /// <summary>Null if the helper may make the change, or why not.</summary>
-    public string? Check(ElevatedOp op) => op switch
+    public string? Check(ElevatedOp? op) => op switch
     {
         ElevatedOp.SetRuleEnabled { Enabled: false } r =>
-            rules.TryGetValue(r.Id, out var rule) && rule.Inbound && rule.Allow ? null : "only inbound allow rules can be switched off",
+            r.Id is not null && rules.TryGetValue(r.Id, out var rule) && rule.Inbound && rule.Allow
+                ? null : "only inbound allow rules can be switched off",
         ElevatedOp.SetRuleEnabled { Enabled: true } r =>
-            state.DisabledRules.Contains(r.Id) ? null : "only rules the helper switched off can be switched on",
+            r.Id is not null && state.DisabledRules.Contains(r.Id)
+                ? null : "only rules the helper switched off can be switched on",
         ElevatedOp.BlockLocalNetwork b =>
-            Path.IsPathFullyQualified(b.Program) && File.Exists(b.Program) && b.Label.Length <= 200 && b.ClientKey.Length <= 1000
+            Firewall.IsExecutable(b.Program) && File.Exists(b.Program)
+                && b.Label is { Length: <= 200 } && b.ClientKey is { Length: <= 1000 }
                 ? null : "not a program on this PC",
-        ElevatedOp.RemoveBlocks r => r.ClientKey.Length <= 1000 ? null : "not a client",
+        ElevatedOp.RemoveBlocks r => r.ClientKey is { Length: <= 1000 } ? null : "not a client",
+        ElevatedOp.BlockInternet b =>
+            Firewall.IsExecutable(b.Program) && File.Exists(b.Program)
+                && b.Label is { Length: <= 200 } && b.ClientKey is { Length: <= 1000 }
+                && b.Hosts is { Length: <= 200 } hosts
+                && hosts.All(h => h is { Length: <= 253 } && InternetHosts.Normalized(h) == h)
+                ? null : "not a program on this PC",
+        ElevatedOp.RemoveInternetBlocks r => r.ClientKey is { Length: <= 1000 } ? null : "not a client",
         ElevatedOp.StopService s => WatchedService(s.Name),
         ElevatedOp.SetServiceStart s => WatchedService(s.Name)
             ?? (s.Start == 3 || (state.ServiceStarts.TryGetValue(s.Name, out var original) && original == s.Start)
@@ -278,11 +314,12 @@ public sealed class HelperPolicy
         _ => "the helper doesn't do that",
     };
 
-    string? WatchedService(string name) =>
-        services.TryGetValue(name, out var service) && Watched(service.Program) ? null : "not a watched developer's service";
+    string? WatchedService(string? name) =>
+        name is not null && services.TryGetValue(name, out var service) && Watched(service.Program)
+            ? null : "not a watched developer's service";
 
     string? MachineStartup(ElevatedOp.SetMachineStartup m) =>
-        machineStartup.TryGetValue((m.Wow64, m.Name), out var program) && Watched(program)
+        m.Name is not null && machineStartup.TryGetValue((m.Wow64, m.Name), out var program) && Watched(program)
             ? null : "not a watched developer's startup entry";
 
     bool Watched(string program) => Settings.WatchedByDefault(Client.FromPath(program), publisherOf(program) ?? "");

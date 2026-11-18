@@ -65,6 +65,14 @@ public static partial class AdminChanges
                 RemoveBlocks(Firewall.DescriptionPrefix + r.ClientKey);
                 break;
 
+            case ElevatedOp.BlockInternet b:
+                AddInternetBlocks(b);
+                break;
+
+            case ElevatedOp.RemoveInternetBlocks r:
+                RemoveInternetBlocks(r);
+                break;
+
             case ElevatedOp.SetMachineStartup m:
                 using (var key = Registry.LocalMachine.CreateSubKey(Startup.ApprovedKey(m.Wow64)))
                     key.SetValue(m.Name, Startup.Approval(m.Enabled), RegistryValueKind.Binary);
@@ -79,16 +87,22 @@ public static partial class AdminChanges
     /// <summary>One outbound block rule per protocol, through the Windows Firewall COM API.</summary>
     static void AddBlocks(ElevatedOp.BlockLocalNetwork block)
     {
+        if (!Firewall.IsExecutable(block.Program)) return;
+        var program = Firewall.LongProgramPath(block.Program);
+        var ownRules = (Firewall.Read() ?? throw new InvalidOperationException("Couldn't read firewall rules."))
+            .Where(r => r.Group == Firewall.Group && r.Description == Firewall.DescriptionPrefix + block.ClientKey);
+        var missing = Firewall.MissingBlockProtocols(program, ownRules);
+        if (missing.Length == 0) return;
         var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2", throwOnError: true)!;
         var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule", throwOnError: true)!;
         dynamic policy = Activator.CreateInstance(policyType)!;
-        foreach (var protocol in new[] { 6, 17 }) // TCP, UDP
+        foreach (var protocol in missing) // TCP, UDP
         {
             dynamic rule = Activator.CreateInstance(ruleType)!;
             rule.Name = $"Revoke: keep {block.Label} off the local network";
             rule.Description = Firewall.DescriptionPrefix + block.ClientKey;
             rule.Grouping = Firewall.Group;
-            rule.ApplicationName = block.Program;
+            rule.ApplicationName = program;
             rule.Protocol = protocol; // before ports, which only apply to TCP and UDP
             rule.RemotePorts = Firewall.Ports;
             rule.RemoteAddresses = string.Join(',', Firewall.LocalAddresses);
@@ -99,6 +113,43 @@ public static partial class AdminChanges
             policy.Rules.Add(rule);
         }
     }
+
+    /// <summary>One outbound internet-host allowlist rule per protocol, through the Windows Firewall COM API.</summary>
+    static void AddInternetBlocks(ElevatedOp.BlockInternet block)
+    {
+        if (!Firewall.IsExecutable(block.Program)) return;
+        var program = Firewall.LongProgramPath(block.Program);
+        var ownRules = (Firewall.Read() ?? throw new InvalidOperationException("Couldn't read firewall rules."))
+            .Where(r => r.Group == Firewall.Group && r.Description == Firewall.InternetDescriptionPrefix + block.ClientKey);
+        var missing = Firewall.MissingBlockProtocols(program, ownRules);
+        if (missing.Length == 0) return;
+        var ips = InternetHosts.ResolveAllowedIps(block.Hosts);
+        var ranges = InternetHosts.ComplementRanges(ips);
+        if (ranges.Count == 0) return;
+        var remoteAddresses = string.Join(',', ranges);
+        var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2", throwOnError: true)!;
+        var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule", throwOnError: true)!;
+        dynamic policy = Activator.CreateInstance(policyType)!;
+        foreach (var protocol in missing) // TCP, UDP
+        {
+            dynamic rule = Activator.CreateInstance(ruleType)!;
+            rule.Name = $"Revoke: keep {block.Label} to its model's hosts on the internet";
+            rule.Description = Firewall.InternetDescriptionPrefix + block.ClientKey;
+            rule.Grouping = Firewall.Group;
+            rule.ApplicationName = program;
+            rule.Protocol = protocol; // before ports, which only apply to TCP and UDP
+            rule.RemotePorts = Firewall.Ports;
+            rule.RemoteAddresses = remoteAddresses;
+            rule.Direction = 2; // NET_FW_RULE_DIR_OUT
+            rule.Action = 0; // NET_FW_ACTION_BLOCK
+            rule.Profiles = 0x7FFFFFFF; // NET_FW_PROFILE2_ALL
+            rule.Enabled = true;
+            policy.Rules.Add(rule);
+        }
+    }
+
+    static void RemoveInternetBlocks(ElevatedOp.RemoveInternetBlocks r) =>
+        RemoveBlocks(Firewall.InternetDescriptionPrefix + r.ClientKey);
 
     /// <summary>Deletes every firewall rule Revoke added, as when removing the helper.
     /// Returns why it couldn't, or null.</summary>

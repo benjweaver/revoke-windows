@@ -3,7 +3,8 @@
 A notification-area app that shows what AI agents such as Claude, ChatGPT/Codex, and
 Claude Code can do on your PC, and takes it away: it stops them along with everything
 they started, switches off their privacy access, keeps them from starting by
-themselves, and closes the firewall rules that let your network reach them. It also
+themselves, and closes the firewall rules that let your network reach them. It can
+limit their public internet connections to their model providers' hosts. It also
 stops web pages, emails, and documents from opening an agent with a link that carries a
 prompt.
 
@@ -13,7 +14,7 @@ built natively with WinUI 3.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/revoke-windows-grid-dark.png">
-    <img src="docs/screenshots/revoke-windows-grid.png" width="581" alt="Revoke for Windows' panel: ChatGPT, Claude, and GitHub Copilot are watched, with switches for Running, Startup, Service, Links, Screen, Camera, Mic, Location, and Network.">
+    <img src="docs/screenshots/revoke-windows-grid.png" width="581" alt="Revoke's panel with watched apps and switches for Network, Internet, and All Access.">
   </picture>
 </p>
 <p align="center">
@@ -41,6 +42,21 @@ The tray lock is open while any watched app is running or can capture the screen
 | Screen | It may capture the screen through Windows' screenshot API | Denies it in Settings › Privacy & security |
 | Camera, Mic, Location | It's allowed to use them | Denies it. A red dot means it's using one right now |
 | Network | Devices on your network can connect to it, or it can reach them | Switches off its inbound firewall rules and blocks it from your local network (asks for admin) |
+| Internet | It can connect to any public internet host | Blocks outbound TCP and UDP connections outside its provider's hosts and the extra hosts in Settings (asks for admin) |
+
+For apps without built-in provider hosts, such as VSCodium, switching Internet off
+blocks their public TCP and UDP connections except DNS. Add any hosts they need under
+**Settings › Internet › Extra allowed hosts** before switching it off. These extra
+hosts apply to every limited app. Revoke resolves host names to IP addresses when it
+creates firewall rules. An address shared by other sites can remain reachable, and an
+address that changes later can stop working until you switch Internet off again.
+DNS and protocols other than TCP and UDP are outside this switch's block.
+
+When an app update adds a new executable path or inbound allow rule, Revoke extends
+an existing Network or Internet block automatically while the current admin helper
+is running. It keeps the old blocks in place during the update. If the helper cannot
+repair a block, the panel warns that access is not fully blocked and retries;
+switching the column off retries immediately.
 
 The WATCHED header has a switch for each column. It is on if any watched app has
 that switch on; switching it off applies to every watched app. Switching it back on
@@ -105,6 +121,23 @@ It can also act automatically, if you turn these on in Settings:
 Automatic stops also switch Links off, so nothing can open an app that was stopped
 behind your back. They leave service startup settings and firewall rules alone, and use
 the installed helper for service stops that need admin rights, without a UAC prompt.
+
+### Asking for access
+
+An app or agent can ask Revoke to lift a local network or Internet block, or open
+Windows Settings for a privacy permission. Revoke shows a Yes/No prompt and changes
+nothing unless you choose Yes. From a terminal:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Revoke\Revoke.exe" --request "revoke://request?access=local-network&minutes=15&reason=Reach%20the%20test%20VM"
+```
+
+The access names are `local-network`, `internet`, `screen`, `camera`, `microphone`,
+and `location`. `revoke://request?...` links work too. Revoke traces the requesting
+process where it can; a link may only carry an unverified app name, which the prompt
+labels as such. With the admin helper running, a network or Internet grant lasts for
+the requested time (up to four hours), and Revoke retries if the helper is unavailable
+when it expires. Without the helper, the prompt says the grant has no automatic end.
 
 Everything Revoke does is logged, in `%LOCALAPPDATA%\Revoke\Revoke.log`: each change,
 each automatic stop, and each link it stood in for, with what you answered.
@@ -298,8 +331,40 @@ on a PC without either installed. Building the app also publishes the helper
 (`src/Revoke.Helper`) beside it as one file, `Helper\RevokeHelper.exe`.
 `scripts/make-icons.py` redraws the tray icons.
 
-The tests only read your PC, except for stopping processes they start themselves and
+The `dotnet test` checks only read your PC, except for stopping processes they start themselves and
 adding, then removing, made-up link schemes of their own in your part of the registry.
+
+## Windows VM integration tests
+
+With an Aviary-managed Windows VM running, signed in, and configured for Aviary SSH:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\vm-test.ps1 -UpdateScreenshots
+```
+
+The script selects the one running, SSH-ready Windows VM. If there are several, pass
+its Aviary ID with `-Machine`. It publishes this checkout and a self-contained probe,
+copies them into the guest, and runs the checks in the signed-in desktop session. An
+out-of-date admin helper opens the VM's UAC prompt for you to approve. The suite checks
+the provider host allowlist, the no-host VSCodium policy, local-network firewall rules,
+new executable paths after an update, a `.tmp` updater, a declined `revoke://request`,
+and a one-minute `--request` grant and its expiry. Installed app checks report a skip
+when that app is absent; authenticated model calls still need a signed-in person to try
+them. Windows Firewall cannot attach a path rule to an updater running as `.tmp`, so
+that process's own connections remain outside the block.
+
+The guest runner restores the switches it changes and the VM's theme. Reports and
+cropped screenshots go under `publish/vm-test/results/`. `-UpdateScreenshots` copies
+the passing run's panel and access-request captures into `docs/screenshots/`. These
+images show the suite's test programs, not installed provider apps. A passing default
+run removes its staged files from the VM; a failed run keeps them for diagnosis.
+The [light](docs/screenshots/revoke-windows-vm-test-grid.png) and
+[dark](docs/screenshots/revoke-windows-vm-test-grid-dark.png) fixture captures remain
+available after release screenshots are retaken.
+
+<p align="center">
+  <img src="docs/screenshots/revoke-windows-access-request.png" width="414" alt="Revoke's VM test access-request prompt naming an unverified antigravityprobe requester, with No focused and Yes beside it.">
+</p>
 
 ## Support
 
@@ -313,9 +378,10 @@ app, zips it with a `SHA256SUMS` file, and publishes a GitHub release with that
 changelog section as its notes, which the install script then finds. It needs the
 GitHub CLI, signed in.
 
-After a release, `scripts/screenshots.sh` on the Mac retakes the README's screenshots
-from the latest release, in the Windows 11 VM. Commit the changed `docs/screenshots`
-afterward.
+After a release, `scripts/screenshots.sh` on the Mac retakes the README's main panel
+and link-prompt screenshots with installed apps from the latest release, in the
+Windows 11 VM. The Windows VM suite above captures the branch build and its access
+request prompt. Commit the changed `docs/screenshots` afterward.
 
 ## License
 
